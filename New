@@ -1,0 +1,12 @@
+pi-app/
+  setup.sh
+  requirements.txt
+  app/
+    __init__.py
+    main.py
+    db.py
+    ocr.py
+    classifier.py
+  templates/
+    index.html
+    draft.html
