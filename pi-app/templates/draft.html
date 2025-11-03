@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Review Draft</title>
+  <style>
+    body{font-family:system-ui,Arial;margin:1rem}
+    .row{display:flex;gap:.5rem;align-items:center}
+    input,textarea{width:100%;padding:.6rem;border:1px solid #ccc;border-radius:8px}
+    label{font-size:.9rem;color:#333}
+    .pill{font-size:.8rem;padding:.2rem .5rem;border-radius:999px;border:1px solid #ddd}
+    img{max-width:100px;border-radius:8px;border:1px solid #ddd;margin-right:.25rem}
+  </style>
+</head>
+<body>
+<h3>Review Draft #{{d.id}}</h3>
+<div>
+  {% for t in d.thumbs %}<img src="{{t}}" />{% endfor %}
+</div>
+<form method="post" action="/api/draft/{{d.id}}/save">
+  <label>Title<input name="title" value="{{d.title or ''}}"/></label><br/>
+  <label>Brand<input name="brand" value="{{d.brand.value if d.brand else ''}}"/></label>
+  <span class="pill">{{d.brand.confidence if d.brand else ''}}</span><br/>
+  <label>Size<input name="size" value="{{d.size.value if d.size else ''}}"/></label>
+  <span class="pill">{{d.size.confidence if d.size else ''}}</span><br/>
+  <label>Item Type<input name="item_type" value="{{d.item_type.value if d.item_type else ''}}"/></label>
+  <span class="pill">{{d.item_type.confidence if d.item_type else ''}}</span><br/>
+  <label>Colour<input name="colour" value="{{d.colour.value if d.colour else ''}}"/></label>
+  <span class="pill">{{d.colour.confidence if d.colour else ''}}</span><br/>
+  <label>Condition<input name="condition" value="{{d.condition.value if d.condition else ''}}"/></label>
+  <span class="pill">{{d.condition.confidence if d.condition else ''}}</span><br/>
+  <label>Price (GBP)<input name="price" value="{{d.price or ''}}"/></label><br/>
+  <button type="submit">Save</button>
+  <button formaction="/api/draft/{{d.id}}/check_price" formmethod="post">Check Price</button>
+</form>
+</body>
+</html>
