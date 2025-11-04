@@ -1,15 +1,20 @@
 from fastapi import FastAPI, UploadFile, File, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
 from pathlib import Path
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 import httpx
-import os, shutil, subprocess
+import os, shutil, subprocess, asyncio, logging
+
 from app.db import connect, init_db, now
 from app.ocr import OCR
 from app.classifier import dominant_colour, item_type_from_name
+
+# ---------- Logging ----------
+log = logging.getLogger("vinted-pi")
+logging.basicConfig(level=logging.INFO)
 
 # ---------- Env / paths ----------
 load_dotenv()
@@ -21,7 +26,8 @@ INP = BASE / 'input_images'
 OUT = BASE / 'converted_images'
 BAK = BASE / 'backups'
 THUMBS = BASE / 'static' / 'thumbs'
-THUMBS.mkdir(parents=True, exist_ok=True)
+for p in (INP, OUT, BAK, THUMBS):
+    p.mkdir(parents=True, exist_ok=True)
 
 # ---------- FastAPI ----------
 app = FastAPI()
@@ -36,8 +42,9 @@ def _ensure_db_ready():
         from app import db as d
         Path(d.DB_PATH).parent.mkdir(parents=True, exist_ok=True)
         init_db()
+        log.info("DB ready at %s", d.DB_PATH)
     except Exception as e:
-        print("DB init warning:", e)
+        log.warning("DB init warning: %s", e)
 
 # ---------- Image helpers (DNG/HEIC/RAW -> JPEG) ----------
 def _run_im_cmd(args: list[str]) -> bool:
@@ -119,6 +126,10 @@ def make_thumb(jpeg_path: Path, thumb_path: Path) -> None:
         img.save(thumb_path, quality=70)
 
 # ---------- Routes ----------
+@app.get('/health')
+def health():
+    return {"ok": True}
+
 @app.get('/', response_class=HTMLResponse)
 def home(request: Request):
     return tmpl.TemplateResponse('index.html', {'request': request})
@@ -164,37 +175,38 @@ def list_drafts():
 
 @app.post('/api/upload')
 async def upload(files: list[UploadFile] = File(...)):
+    # Create item
     with connect() as c:
         c.execute('insert into items(status,created_at,updated_at) values(?,?,?)', ('draft', now(), now()))
         item_id = c.execute('select last_insert_rowid()').fetchone()[0]
         c.commit()
 
+    # Folders
     item_dir = INP / f'item-{item_id}'
-    out_dir = OUT / f'item-{item_id}'
-    bak_dir = BAK / f'item-{item_id}'
-    item_dir.mkdir(parents=True, exist_ok=True)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    bak_dir.mkdir(parents=True, exist_ok=True)
+    out_dir  = OUT / f'item-{item_id}'
+    bak_dir  = BAK / f'item-{item_id}'
+    for p in (item_dir, out_dir, bak_dir):
+        p.mkdir(parents=True, exist_ok=True)
 
+    # Save + convert each file (offloaded to thread so we don't block)
     paths: list[tuple[Path, Path]] = []
     for f in files:
         dest = item_dir / f.filename
         with open(dest, 'wb') as w:
             w.write(await f.read())
-        # backup original
         shutil.copyfile(dest, bak_dir / f.filename)
-        # convert to jpeg + thumb
+
         out_path = out_dir / Path(f.filename).with_suffix('.jpg').name
-        to_jpeg(dest, out_path)
-        make_thumb(out_path, THUMBS / f'{out_path.stem}.jpg')
+        await asyncio.to_thread(to_jpeg, dest, out_path)
+        await asyncio.to_thread(make_thumb, out_path, THUMBS / f'{out_path.stem}.jpg')
         paths.append((dest, out_path))
 
-    # -------- Label OCR: pick the photo with most OCR-able text --------
+    # -------- Label OCR: use the OPTIMISED JPEGs (reliable for Tesseract) --------
     brand, bconf, size, sconf = None, 'Low', None, 'Low'
     if paths:
         best_score, best_text = -1, ""
-        for (orig, _opt) in paths:
-            t = ocr.read_text(orig)  # Tesseract pass
+        for (_orig, opt) in paths:
+            t = ocr.read_text(opt)  # run on JPEG we just made
             score = sum(ch.isalnum() for ch in t)
             if score > best_score:
                 best_score, best_text = score, t
@@ -222,13 +234,12 @@ async def upload(files: list[UploadFile] = File(...)):
     # Discord ping
     if WEBHOOK:
         try:
-            import asyncio
-            async def ping():
-                async with httpx.AsyncClient(timeout=10) as cli:
-                    await cli.post(WEBHOOK, json={'content': f'🧵 Draft ready: Item #{item_id} – http://localhost:8080/draft/{item_id}'})
-            asyncio.get_event_loop().run_until_complete(ping())
-        except Exception:
-            pass
+            async with httpx.AsyncClient(timeout=10) as cli:
+                await cli.post(WEBHOOK, json={
+                    'content': f'🧵 Draft ready: Item #{item_id} – http://localhost:8080/draft/{item_id}'
+                })
+        except Exception as e:
+            log.warning("Discord webhook failed: %s", e)
 
     return {'message': f'Created draft #{item_id}', 'item_id': item_id}
 
@@ -268,8 +279,8 @@ async def check_price(item_id: int):
                     p75 = int(float(data.get('p75_gbp', 0))*100) if data.get('p75_gbp') else None
                     examples = data.get('examples', [])[:5]
                     break
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("Pricing fetch failed: %s", e)
 
     with connect() as c:
         if rec is not None:
