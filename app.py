@@ -147,17 +147,21 @@ def fetch_vinted_api(query, session):
                     or "Item"
                 )
                 # price fields seen historically:
+                # price fields seen historically:
                 price_val = (
-                    it.get("price") or
-                    it.get("price_numeric") or
-                    (it.get("price_with_currency", {}).get("amount") if isinstance(it.get("price_with_currency"), dict) else None)
+                it.get("price")
+                or it.get("price_numeric")
+                or (it.get("price_with_currency", {}).get("amount") if isinstance(it.get("price_with_currency"), dict) else None)
                 )
                 if isinstance(price_val, str):
-                    price_val = parse_price(price_val)
+                price_val = parse_price(price_val)
                 elif isinstance(price_val, (int, float)):
-                    price_val = float(price_val)
+                # API often returns minor units (pence). Convert if it looks like pence.
+                price_val = float(price_val)
+                if price_val >= 100:
+                price_val = price_val / 100.0
                 else:
-                    price_val = None
+                price_val = None
 
                 web_url = it.get("url") or it.get("path")
                 if web_url and web_url.startswith("/"):
