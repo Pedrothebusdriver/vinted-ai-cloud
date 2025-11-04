@@ -3,7 +3,6 @@ import math
 import time
 import random
 from typing import List, Dict, Any, Optional
-from urllib.parse import urlencode
 
 import requests
 from flask import Flask, request, jsonify
@@ -79,15 +78,24 @@ def normalize_query(brand: str, item_type: str, size: str, colour: str) -> str:
 
 
 def parse_price(text: Optional[str]) -> Optional[float]:
-    """Extract GBP float from messy text like '£12.50' or '12 GBP'."""
+    """Extract GBP float from '£12.50', '12 GBP', '£47,95', '1,299.00', or integer pence like '4795'."""
     if not text:
         return None
-    t = text.replace(",", "").strip()
-    if "£" in t:
-        t = t.split("£", 1)[-1]
-    if "GBP" in t.upper():
-        t = t.upper().replace("GBP", "").strip()
+    t = str(text).strip()
 
+    # Normalise spaces & currency symbols
+    t = t.replace("\u00A0", " ")  # non-breaking space
+    for sym in ["£", "GBP", "€", "$"]:
+        t = t.replace(sym, "")
+
+    # If there's a comma and no dot, comma is probably decimal separator -> make it a dot
+    if "," in t and "." not in t:
+        t = t.replace(",", ".")
+    else:
+        # Else drop thousands separators like "1,299.00"
+        t = t.replace(",", "")
+
+    # Keep digits and at most one dot
     cleaned = []
     dot = False
     for ch in t:
@@ -96,15 +104,21 @@ def parse_price(text: Optional[str]) -> Optional[float]:
         elif ch == "." and not dot:
             cleaned.append(".")
             dot = True
-        elif ch == " ":
-            cleaned.append(" ")
-    token = "".join(cleaned).strip().split()[-1] if cleaned else ""
-    try:
-        val = float(token)
-        if 0 < val < 10000:
-            return val
-    except Exception:
+        # ignore everything else
+
+    s = "".join(cleaned).strip()
+    if not s:
         return None
+
+    try:
+        v = float(s)
+        # Heuristic: if NO dot and v is large (e.g., 4795), treat as pence
+        if "." not in s and v >= 1000:
+            v = v / 100.0
+        if 0 < v < 10000:
+            return round(v, 2)
+    except Exception:
+        pass
     return None
 
 
