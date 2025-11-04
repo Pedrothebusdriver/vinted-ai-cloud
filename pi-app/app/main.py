@@ -1,5 +1,5 @@
-from fastapi import FastAPI, UploadFile, File, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi import FastAPI, UploadFile, File, Request, Form, BackgroundTasks
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
@@ -14,7 +14,7 @@ from app.classifier import dominant_colour, item_type_from_name
 
 # ---------- Logging ----------
 log = logging.getLogger("vinted-pi")
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
 # ---------- Env / paths ----------
 load_dotenv()
@@ -48,16 +48,14 @@ def _ensure_db_ready():
 
 # ---------- Image helpers (DNG/HEIC/RAW -> JPEG) ----------
 def _run_im_cmd(args: list[str]) -> bool:
-    """Try ImageMagick (IM7 'magick' or IM6 'convert')."""
+    """Try ImageMagick (IM7 'magick' or IM6 'convert') with a timeout."""
     for cmd in ('magick', 'convert'):
         try:
-            subprocess.run([cmd] + args, check=True,
+            subprocess.run([cmd] + args, check=True, timeout=20,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
-        except FileNotFoundError:
+        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             continue
-        except subprocess.CalledProcessError:
-            return False
     return False
 
 def _extract_dng_preview(src_path: Path, dst_path: Path) -> bool:
@@ -82,48 +80,118 @@ def _extract_dng_preview(src_path: Path, dst_path: Path) -> bool:
             continue
     return False
 
-def to_jpeg(src_path: Path, dst_path: Path) -> None:
-    """Convert any image to a resized JPEG (1600px max). Prefers fast DNG preview."""
-    dst_path.parent.mkdir(parents=True, exist_ok=True)
-    ext = src_path.suffix.lower()
+def to_jpeg(src_path: Path, dst_path: Path) -> bool:
+    """
+    Convert any image to a resized JPEG (1600px max). Prefers fast DNG preview.
+    Returns True if a JPEG was produced.
+    """
+    try:
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        ext = src_path.suffix.lower()
 
-    # Already a common raster? Use Pillow (fast + reliable)
-    if ext in {'.jpg', '.jpeg', '.png'}:
+        # Already a common raster? Use Pillow (fast + reliable)
+        if ext in {'.jpg', '.jpeg', '.png'}:
+            img = Image.open(src_path).convert('RGB')
+            img.thumbnail((1600, 1600))
+            img.save(dst_path, quality=85)
+            return True
+
+        # FAST PATH for DNG: extract embedded preview with exiftool
+        if ext == '.dng':
+            if _extract_dng_preview(src_path, dst_path):
+                return True
+            # Fall back to ImageMagick if preview not present (time-limited)
+            if _run_im_cmd([str(src_path), '-auto-orient', '-resize', '1600x1600>', '-quality', '85', str(dst_path)]):
+                return True
+            # Last-ditch: Pillow (may fail on RAW)
+            img = Image.open(src_path).convert('RGB')
+            img.thumbnail((1600, 1600))
+            img.save(dst_path, quality=85)
+            return True
+
+        # HEIC/RAW and other formats – try ImageMagick first
+        if _run_im_cmd([str(src_path), '-auto-orient', '-resize', '1600x1600>', '-quality', '85', str(dst_path)]):
+            return True
+
+        # Fallback to Pillow if IM fails
         img = Image.open(src_path).convert('RGB')
         img.thumbnail((1600, 1600))
         img.save(dst_path, quality=85)
-        return
+        return True
 
-    # FAST PATH for DNG: extract embedded preview with exiftool
-    if ext == '.dng':
-        if _extract_dng_preview(src_path, dst_path):
-            return
-        # Fall back to ImageMagick if preview not present
-        ok = _run_im_cmd([str(src_path), '-auto-orient', '-resize', '1600x1600>', '-quality', '85', str(dst_path)])
-        if ok:
-            return
-        # Last-ditch: Pillow (may fail on RAW)
-        img = Image.open(src_path).convert('RGB')
-        img.thumbnail((1600, 1600))
-        img.save(dst_path, quality=85)
-        return
-
-    # HEIC/RAW and other formats – try ImageMagick first
-    ok = _run_im_cmd([str(src_path), '-auto-orient', '-resize', '1600x1600>', '-quality', '85', str(dst_path)])
-    if ok:
-        return
-
-    # Fallback to Pillow if IM fails
-    img = Image.open(src_path).convert('RGB')
-    img.thumbnail((1600, 1600))
-    img.save(dst_path, quality=85)
+    except (UnidentifiedImageError, OSError, subprocess.TimeoutExpired) as e:
+        log.warning("to_jpeg failed for %s: %s", src_path, e)
+        return False
 
 def make_thumb(jpeg_path: Path, thumb_path: Path) -> None:
     thumb_path.parent.mkdir(parents=True, exist_ok=True)
     if not _run_im_cmd([str(jpeg_path), '-thumbnail', '128x128', str(thumb_path)]):
-        img = Image.open(jpeg_path).copy()
-        img.thumbnail((128, 128))
-        img.save(thumb_path, quality=70)
+        try:
+            img = Image.open(jpeg_path).copy()
+            img.thumbnail((128, 128))
+            img.save(thumb_path, quality=70)
+        except Exception as e:
+            log.warning("thumb failed for %s: %s", jpeg_path, e)
+
+# ---------- Background job to process one item ----------
+async def _process_item(item_id: int, filepaths: list[Path]) -> None:
+    out_dir  = OUT / f'item-{item_id}'
+    thumbs = []
+    paths: list[tuple[Path, Path]] = []
+
+    for src in filepaths:
+        out_path = out_dir / Path(src.name).with_suffix('.jpg').name
+        ok = await asyncio.to_thread(to_jpeg, src, out_path)
+        if ok:
+            await asyncio.to_thread(make_thumb, out_path, THUMBS / f'{out_path.stem}.jpg')
+            paths.append((src, out_path))
+            thumbs.append(str(THUMBS / f'{out_path.stem}.jpg'))
+        else:
+            # write a placeholder so UI stays happy
+            ph = Path('static/no-thumb.png')
+            if ph.exists():
+                shutil.copyfile(ph, THUMBS / f'{out_path.stem}.jpg')
+
+    # -------- Label OCR: read from OPTIMISED JPEGs (more reliable) --------
+    brand, bconf, size, sconf = None, 'Low', None, 'Low'
+    if paths:
+        best_score, best_text = -1, ""
+        for (_orig, opt) in paths:
+            t = ocr.read_text(opt)
+            score = sum(ch.isalnum() for ch in t)
+            if score > best_score:
+                best_score, best_text = score, t
+        if best_score >= 0:
+            b, bc, s, sc = ocr.extract_brand_size(best_text)
+            brand, bconf, size, sconf = b, bc, s, sc
+
+    # Heuristics for type/colour
+    first_name = filepaths[0].name if filepaths else 'clothing'
+    item_type, iconf = item_type_from_name(first_name)
+    colour = dominant_colour(paths[0][1]) if paths else 'Unknown'
+
+    # Save to DB
+    with connect() as c:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for orig, opt in paths:
+            c.execute('insert into photos(item_id, original_path, optimised_path, width, height, is_label) values (?,?,?,?,?,0)',
+                      (item_id, str(orig), str(opt), 0, 0))
+        c.execute('insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)', (item_id,'brand', brand or '', bconf))
+        c.execute('insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)', (item_id,'size', size or '', sconf))
+        c.execute('insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)', (item_id,'item_type', item_type, iconf))
+        c.execute('insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)', (item_id,'colour', colour, 'Medium'))
+        c.execute('insert or ignore into drafts(item_id, title, price_pence) values (?,?,?)', (item_id, '', None))
+        c.commit()
+
+    # Discord ping
+    if WEBHOOK:
+        try:
+            async with httpx.AsyncClient(timeout=10) as cli:
+                await cli.post(WEBHOOK, json={
+                    'content': f'🧵 Draft ready: Item #{item_id} – http://localhost:8080/draft/{item_id}'
+                })
+        except Exception as e:
+            log.warning("Discord webhook failed: %s", e)
 
 # ---------- Routes ----------
 @app.get('/health')
@@ -174,7 +242,7 @@ def list_drafts():
     return resp
 
 @app.post('/api/upload')
-async def upload(files: list[UploadFile] = File(...)):
+async def upload(background_tasks: BackgroundTasks, files: list[UploadFile] = File(...)):
     # Create item
     with connect() as c:
         c.execute('insert into items(status,created_at,updated_at) values(?,?,?)', ('draft', now(), now()))
@@ -183,65 +251,22 @@ async def upload(files: list[UploadFile] = File(...)):
 
     # Folders
     item_dir = INP / f'item-{item_id}'
-    out_dir  = OUT / f'item-{item_id}'
     bak_dir  = BAK / f'item-{item_id}'
-    for p in (item_dir, out_dir, bak_dir):
+    for p in (item_dir, bak_dir):
         p.mkdir(parents=True, exist_ok=True)
 
-    # Save + convert each file (offloaded to thread so we don't block)
-    paths: list[tuple[Path, Path]] = []
+    # Save originals now (fast), process later in background
+    saved: list[Path] = []
     for f in files:
         dest = item_dir / f.filename
         with open(dest, 'wb') as w:
             w.write(await f.read())
         shutil.copyfile(dest, bak_dir / f.filename)
+        saved.append(dest)
 
-        out_path = out_dir / Path(f.filename).with_suffix('.jpg').name
-        await asyncio.to_thread(to_jpeg, dest, out_path)
-        await asyncio.to_thread(make_thumb, out_path, THUMBS / f'{out_path.stem}.jpg')
-        paths.append((dest, out_path))
-
-    # -------- Label OCR: use the OPTIMISED JPEGs (reliable for Tesseract) --------
-    brand, bconf, size, sconf = None, 'Low', None, 'Low'
-    if paths:
-        best_score, best_text = -1, ""
-        for (_orig, opt) in paths:
-            t = ocr.read_text(opt)  # run on JPEG we just made
-            score = sum(ch.isalnum() for ch in t)
-            if score > best_score:
-                best_score, best_text = score, t
-        if best_score >= 0:
-            b, bc, s, sc = ocr.extract_brand_size(best_text)
-            brand, bconf, size, sconf = b, bc, s, sc
-
-    # Heuristics for type/colour
-    first_name = files[0].filename if files else 'clothing'
-    item_type, iconf = item_type_from_name(first_name)
-    colour = dominant_colour(paths[0][1]) if paths else 'Unknown'
-
-    # Save to DB
-    with connect() as c:
-        for orig, opt in paths:
-            c.execute('insert into photos(item_id, original_path, optimised_path, width, height, is_label) values (?,?,?,?,?,0)',
-                      (item_id, str(orig), str(opt), 0, 0))
-        c.execute('insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)', (item_id,'brand', brand or '', bconf))
-        c.execute('insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)', (item_id,'size', size or '', sconf))
-        c.execute('insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)', (item_id,'item_type', item_type, iconf))
-        c.execute('insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)', (item_id,'colour', colour, 'Medium'))
-        c.execute('insert or ignore into drafts(item_id, title, price_pence) values (?,?,?)', (item_id, '', None))
-        c.commit()
-
-    # Discord ping
-    if WEBHOOK:
-        try:
-            async with httpx.AsyncClient(timeout=10) as cli:
-                await cli.post(WEBHOOK, json={
-                    'content': f'🧵 Draft ready: Item #{item_id} – http://localhost:8080/draft/{item_id}'
-                })
-        except Exception as e:
-            log.warning("Discord webhook failed: %s", e)
-
-    return {'message': f'Created draft #{item_id}', 'item_id': item_id}
+    # Kick off background processing and return immediately
+    background_tasks.add_task(_process_item, item_id, saved)
+    return {"queued": True, "item_id": item_id}
 
 @app.post('/api/draft/{item_id}/save')
 async def save_draft(item_id: int, title: str = Form(''), brand: str = Form(''), size: str = Form(''),
