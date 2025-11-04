@@ -1,0 +1,40 @@
+version: "3.9"
+
+services:
+  cloud-helper:
+    build:
+      context: .
+      dockerfile: Dockerfile.helper
+    environment:
+      VINTED_BASE: "https://www.vinted.co.uk"
+      CACHE_TTL: "900"
+      OUTLIER_FILTER: "1"
+      CLAMP_MIN: "8"        # <-- guards against tiny junk prices
+      CLAMP_MAX: "500"
+    ports:
+      - "5055:5055"
+    command: >
+      gunicorn app:app
+      --bind 0.0.0.0:5055
+      --workers 1 --threads 2 --timeout 120
+
+  pi-ui:
+    build:
+      context: ./pi-app
+      dockerfile: Dockerfile
+    environment:
+      DISCORD_WEBHOOK_URL: "${DISCORD_WEBHOOK_URL}"  # set at run time
+      COMPS_BASE_URL: "http://cloud-helper:5055"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./pi-app/data:/app/data
+      - ./pi-app/input_images:/app/input_images
+      - ./pi-app/converted_images:/app/converted_images
+      - ./pi-app/backups:/app/backups
+      - ./pi-app/static:/app/static
+    depends_on:
+      - cloud-helper
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0 --port 8080
