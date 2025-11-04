@@ -5,17 +5,24 @@
   <title>Vinted Pi – Uploader</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
+    :root { --border:#e9e9e9; --muted:#777; }
+    * { box-sizing:border-box; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
     h1 { margin: 0 0 12px; }
-    .row { display:flex; align-items:center; gap:12px; margin:12px 0 24px; }
+    .row { display:flex; align-items:center; gap:12px; margin:12px 0 8px; flex-wrap:wrap; }
     input[type=file] { padding: 6px; }
-    button { padding: 8px 14px; border-radius: 10px; border: 1px solid #ddd; cursor: pointer; }
-    #chosen { color:#666; }
-    .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap:12px; }
-    .card { border:1px solid #eee; border-radius:12px; padding:10px; text-decoration:none; color:inherit; }
-    .thumb { width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:8px; display:block; }
-    .pill { display:inline-block; font-size:12px; padding:2px 8px; border-radius:999px; background:#f3f3f3; margin-right:6px;}
-    .row small { color:#888; }
+    button { padding: 8px 14px; border-radius: 10px; border: 1px solid var(--border); cursor: pointer; background:#fff; }
+    small { color: var(--muted); }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:14px; margin-top:18px; }
+    .card { border:1px solid var(--border); border-radius:12px; padding:10px; text-decoration:none; color:inherit; display:block; }
+    .thumb { width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:8px; display:block; background:#f6f6f6; }
+    .rowline { display:flex; align-items:center; gap:8px; margin-top:6px; }
+    .pill { display:inline-block; font-size:12px; padding:2px 8px; border-radius:999px; background:#f3f3f3; margin-right:6px; }
+    .badge { font-size:11px; color:#444; background:#f1f1f1; border-radius:999px; padding:2px 8px; }
+    .status { font-weight:500; }
+    .sp { width:14px; height:14px; border:2px solid var(--border); border-top-color:#000; border-radius:50%; animation:spin .8s linear infinite; display:inline-block; vertical-align:middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -29,6 +36,7 @@
       <button id="addBtn" type="submit">Add Item</button>
       <small id="chosen">No files chosen</small>
     </div>
+    <div class="hint">Tip: include <b>one close‑up photo of the brand/size label</b> for best accuracy. Women’s/children’s sizes are supported.</div>
   </form>
 
   <h3>Drafts</h3>
@@ -37,20 +45,33 @@
   <script>
   const files = document.getElementById('files');
   const chosen = document.getElementById('chosen');
+  const addBtn = document.getElementById('addBtn');
+
   files.addEventListener('change', () => {
     const n = files.files.length;
     chosen.textContent = n ? `${n} file${n>1?'s':''} selected` : 'No files chosen';
   });
 
-  // Guard submit if no files picked
-  document.getElementById('uploadForm').addEventListener('submit', (e) => {
-    if (!files.files.length) {
-      e.preventDefault();
-      alert('Please choose at least one photo (JPG/PNG/HEIC/DNG/RAW).');
+  document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!files.files.length) return alert('Please choose at least one photo.');
+    try {
+      addBtn.disabled = true; addBtn.innerHTML = '<span class="sp"></span> Uploading…';
+      const fd = new FormData(e.target);
+      const r = await fetch('/api/upload', { method: 'POST', body: fd });
+      const data = await r.json();
+      chosen.textContent = `Queued item #${data.item_id}`;
+      files.value = '';
+      setTimeout(loadDrafts, 1200);
+      setTimeout(loadDrafts, 3000);
+    } catch (err) {
+      alert('Upload failed.');
+      console.error(err);
+    } finally {
+      addBtn.disabled = false; addBtn.textContent = 'Add Item';
     }
   });
 
-  // Load drafts list
   async function loadDrafts() {
     try {
       const r = await fetch('/api/drafts', { cache: 'no-store' });
@@ -61,14 +82,21 @@
         const a = document.createElement('a');
         a.href = `/draft/${d.id}`;
         a.className = 'card';
+        const thumb = (d.thumbs && d.thumbs[0]) || '/static/no-thumb.png';
+        const brand = d.brand?.value || '';
+        const size = d.size?.value || '';
+        const bconf = d.brand?.confidence || '';
+        const sconf = d.size?.confidence || '';
         a.innerHTML = `
-          <img class="thumb" src="${(d.thumbs && d.thumbs[0]) || '/static/no-thumb.png'}" alt="">
-          <div style="margin-top:6px;">
+          <img class="thumb" src="${thumb}" alt="">
+          <div class="rowline" style="margin-top:8px;">
             <div style="font-weight:600;">#${d.id} ${(d.title||'').slice(0,40)}</div>
-            <div>
-              ${d.brand?.value ? `<span class="pill">${d.brand.value}</span>` : ''}
-              ${d.size?.value ? `<span class="pill">${d.size.value}</span>` : ''}
-            </div>
+          </div>
+          <div class="rowline">
+            ${brand ? `<span class="pill">${brand}</span>` : ''}
+            ${size ? `<span class="pill">${size}</span>` : ''}
+            ${bconf ? `<span class="badge">${bconf}</span>` : ''}
+            ${sconf ? `<span class="badge">${sconf}</span>` : ''}
           </div>`;
         root.appendChild(a);
       }
