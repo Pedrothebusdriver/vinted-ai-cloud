@@ -1,0 +1,17 @@
+# Python / venv
+*.pyc
+__pycache__/
+pi-app/.venv/
+
+# Local env & secrets
+pi-app/.env
+
+# Generated images & backups
+pi-app/input_images/
+pi-app/converted_images/
+pi-app/backups/
+pi-app/static/thumbs/
+
+# OS junk
+.DS_Store
+Thumbs.db
