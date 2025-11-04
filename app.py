@@ -1,4 +1,5 @@
 import os
+import re
 import math
 import time
 import random
@@ -16,10 +17,13 @@ CONNECT_TIMEOUT = float(os.getenv("CONNECT_TIMEOUT", "5"))
 READ_TIMEOUT = float(os.getenv("READ_TIMEOUT", "15"))
 DEFAULT_TIMEOUT = (CONNECT_TIMEOUT, READ_TIMEOUT)
 
-MAX_ITEMS = int(os.getenv("MAX_ITEMS", "40"))          # cap results for memory/speed
-EXAMPLES_LIMIT = int(os.getenv("EXAMPLES_LIMIT", "5"))  # how many examples to return
-CACHE_TTL = int(os.getenv("CACHE_TTL", "600"))          # seconds
+MAX_ITEMS = int(os.getenv("MAX_ITEMS", "40"))           # cap results for memory/speed
+EXAMPLES_LIMIT = int(os.getenv("EXAMPLES_LIMIT", "5"))   # how many examples to return
+CACHE_TTL = int(os.getenv("CACHE_TTL", "600"))           # seconds
 ENABLE_OUTLIER_FILTER = os.getenv("OUTLIER_FILTER", "1") == "1"
+# Optional soft clamp (drop obviously silly prices from HTML scraping)
+CLAMP_MIN = float(os.getenv("CLAMP_MIN", "2"))
+CLAMP_MAX = float(os.getenv("CLAMP_MAX", "500"))
 
 UA_LIST = [
     # tiny + realistic; rotated to avoid being blocked
@@ -32,9 +36,10 @@ UA_LIST = [
 # tiny in-memory cache with TTL (kept simple on purpose)
 _cache: Dict[str, Any] = {}  # key -> {"t": timestamp, "data": dict}
 
+app = Flask(__name__)
 
 # =========================
-# Small math helpers
+# Math helpers
 # =========================
 def pct(values: List[float], p: float) -> Optional[float]:
     if not values:
@@ -49,10 +54,8 @@ def pct(values: List[float], p: float) -> Optional[float]:
     d1 = arr[int(c)] * (k - f)
     return float(d0 + d1)
 
-
 def median(values: List[float]) -> Optional[float]:
     return pct(values, 50)
-
 
 def iqr_filter(vals: List[float]) -> List[float]:
     """Trim extreme outliers with 1.5*IQR; keeps stats stable."""
@@ -67,7 +70,6 @@ def iqr_filter(vals: List[float]) -> List[float]:
     hi = q3 + 1.5 * iqr
     return [v for v in vals if lo <= v <= hi]
 
-
 # =========================
 # Parse & normalize helpers
 # =========================
@@ -76,51 +78,65 @@ def normalize_query(brand: str, item_type: str, size: str, colour: str) -> str:
     q = " ".join(parts)
     return " ".join(q.split())
 
+# Strict currency finder (prefers £... then ...GBP)
+CURRENCY_RXES = [
+    re.compile(r"£\s*([0-9][0-9\s,\.]*)", re.IGNORECASE),
+    re.compile(r"([0-9][0-9\s,\.]*)\s*GBP\b", re.IGNORECASE),
+]
 
-def parse_price(text: Optional[str]) -> Optional[float]:
-    """Extract GBP float from '£12.50', '12 GBP', '£47,95', '1,299.00', or integer pence like '4795'."""
-    if not text:
+def _normalize_amount_string(s: str) -> Optional[float]:
+    """Normalise strings like '1,299.00', '47,95', '4795', '71.08 1' -> float GBP."""
+    if not s:
         return None
-    t = str(text).strip()
+    s = s.strip().replace("\u00A0", " ")  # NBSP -> space
 
-    # Normalise spaces & currency symbols
-    t = t.replace("\u00A0", " ")  # non-breaking space
-    for sym in ["£", "GBP", "€", "$"]:
-        t = t.replace(sym, "")
+    # Remove surrounding junk
+    s = s.strip()
 
-    # If there's a comma and no dot, comma is probably decimal separator -> make it a dot
-    if "," in t and "." not in t:
-        t = t.replace(",", ".")
+    # If comma present and dot absent -> comma likely decimal separator (e.g., 47,95)
+    if "," in s and "." not in s:
+        s = s.replace(",", ".")
     else:
-        # Else drop thousands separators like "1,299.00"
-        t = t.replace(",", "")
+        # Else drop commas as thousand separators (1,299.00)
+        s = s.replace(",", "")
 
-    # Keep digits and at most one dot
+    # Keep digits + at most one dot
     cleaned = []
     dot = False
-    for ch in t:
+    for ch in s:
         if ch.isdigit():
             cleaned.append(ch)
         elif ch == "." and not dot:
-            cleaned.append(".")
-            dot = True
-        # ignore everything else
+            cleaned.append("."); dot = True
+        # else ignore
 
-    s = "".join(cleaned).strip()
-    if not s:
+    s2 = "".join(cleaned)
+    if not s2:
         return None
 
     try:
-        v = float(s)
-        # Heuristic: if NO dot and v is large (e.g., 4795), treat as pence
-        if "." not in s and v >= 1000:
+        v = float(s2)
+        # If no dot originally and v is large like 4795 -> assume pence
+        if "." not in s2 and v >= 1000:
             v = v / 100.0
         if 0 < v < 10000:
             return round(v, 2)
     except Exception:
-        pass
+        return None
     return None
 
+def extract_price_from_text(text: Optional[str]) -> Optional[float]:
+    """Pick the FIRST currency-looking amount, prefer '£...'. Avoids concatenation mistakes."""
+    if not text:
+        return None
+    for rx in CURRENCY_RXES:
+        m = rx.search(text)
+        if m:
+            val = _normalize_amount_string(m.group(1))
+            if val is not None:
+                return val
+    # Fallback: try a looser parse on the whole text
+    return _normalize_amount_string(text)
 
 def uniq(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     seen = set()
@@ -131,7 +147,6 @@ def uniq(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             seen.add(key)
             out.append(it)
     return out
-
 
 def mk_session() -> requests.Session:
     s = requests.Session()
@@ -144,48 +159,41 @@ def mk_session() -> requests.Session:
     })
     return s
 
-
 # =========================
 # Vinted fetchers
 # =========================
 def _coerce_price_gbp_from_api_item(it: Dict[str, Any]) -> Optional[float]:
     """
     API often returns minor units (pence). Convert to GBP when needed.
-    We try string 'amount' first; else handle numeric with a pence→GBP heuristic.
+    Prefer string 'amount', then other fields; numeric may be pence.
     """
     pwc = it.get("price_with_currency")
     if isinstance(pwc, dict):
         amt = pwc.get("amount")
         if isinstance(amt, str):
-            parsed = parse_price(amt)
-            if parsed is not None:
-                return round(float(parsed), 2)
+            val = extract_price_from_text(amt)
+            if val is not None:
+                return val
 
     for key in ("price", "price_numeric", "total_item_price"):
-        val = it.get(key)
-        if isinstance(val, str):
-            parsed = parse_price(val)
-            if parsed is not None:
-                return round(float(parsed), 2)
+        v = it.get(key)
+        if isinstance(v, str):
+            val = extract_price_from_text(v)
+            if val is not None:
+                return val
 
     for key in ("price", "price_numeric", "total_item_price"):
-        val = it.get(key)
-        if isinstance(val, (int, float)):
-            num = float(val)
-            # Heuristic: if >= 100 it's likely pence; convert to GBP
-            if num >= 100:
+        v = it.get(key)
+        if isinstance(v, (int, float)):
+            num = float(v)
+            if num >= 100:    # likely pence
                 return round(num / 100.0, 2)
             if 0 < num < 10000:
                 return round(num, 2)
-
     return None
 
-
 def fetch_vinted_api(query: str, session: requests.Session) -> List[Dict[str, Any]]:
-    """
-    Try Vinted's JSON endpoint first (shape can change).
-    Returns list of {'title','price_gbp','url'}.
-    """
+    """Try Vinted's JSON endpoint first (shape can change)."""
     results: List[Dict[str, Any]] = []
     api_urls = [
         f"{VINTED_BASE}/api/v2/catalog/items",
@@ -207,16 +215,11 @@ def fetch_vinted_api(query: str, session: requests.Session) -> List[Dict[str, An
             data = r.json()
             items = data.get("items") or data.get("data") or []
             for it in items:
-                title = (
-                    it.get("title")
-                    or it.get("description")
-                    or it.get("brand_title")
-                    or "Item"
-                )
+                title = (it.get("title") or it.get("description") or it.get("brand_title") or "Item")
                 price_gbp = _coerce_price_gbp_from_api_item(it)
 
                 web_url = it.get("url") or it.get("path")
-                if web_url and isinstance(web_url, str) and web_url.startswith("/"):
+                if isinstance(web_url, str) and web_url.startswith("/"):
                     web_url = VINTED_BASE + web_url
                 if not web_url:
                     iid = it.get("id")
@@ -224,24 +227,15 @@ def fetch_vinted_api(query: str, session: requests.Session) -> List[Dict[str, An
                         web_url = f"{VINTED_BASE}/items/{iid}"
 
                 if price_gbp is not None:
-                    results.append({
-                        "title": str(title)[:120],
-                        "price_gbp": price_gbp,
-                        "url": web_url or VINTED_BASE,
-                    })
+                    results.append({"title": str(title)[:120], "price_gbp": price_gbp, "url": web_url or VINTED_BASE})
             if results:
                 break
         except Exception:
-            # Be resilient; fall back to HTML
             continue
-
     return results[:MAX_ITEMS]
 
-
 def fetch_vinted_html(query: str, session: requests.Session) -> List[Dict[str, Any]]:
-    """
-    Fallback: crawl search page and extract prices/titles/links.
-    """
+    """Fallback: crawl search page and extract prices/titles/links with strict currency regex."""
     results: List[Dict[str, Any]] = []
     params = {"search_text": query, "order": "newest_first"}
     url = f"{VINTED_BASE}/catalog"
@@ -257,55 +251,52 @@ def fetch_vinted_html(query: str, session: requests.Session) -> List[Dict[str, A
                 continue
             web_url = href if href.startswith("http") else (VINTED_BASE + href)
 
-            # Try to find a price text near the anchor
-            price_text = None
-            texts = [a.get_text(" ", strip=True)]
-            parent = a.parent
-            if parent:
-                texts.append(parent.get_text(" ", strip=True))
-                gp = parent.parent
-                if gp:
-                    texts.append(gp.get_text(" ", strip=True))
-            for t in texts:
-                if "£" in t or "GBP" in t.upper():
-                    price_text = t
+            # Prefer price near the card/anchor; search in progressively larger scopes
+            candidate_texts = [
+                a.get_text(" ", strip=True),
+                a.parent.get_text(" ", strip=True) if a.parent else "",
+                a.parent.parent.get_text(" ", strip=True) if a.parent and a.parent.parent else "",
+            ]
+            price_val: Optional[float] = None
+            for txt in candidate_texts:
+                pv = extract_price_from_text(txt)
+                if pv is not None:
+                    price_val = pv
                     break
-            price = parse_price(price_text)
 
             title = a.get("aria-label") or a.get_text(" ", strip=True) or "Item"
-            if price:
-                results.append({
-                    "title": title[:120],
-                    "price_gbp": float(round(price, 2)),
-                    "url": web_url,
-                })
+            if price_val is not None:
+                results.append({"title": title[:120], "price_gbp": float(price_val), "url": web_url})
     except Exception:
         return results
-
     return results
-
 
 # =========================
 # Main comps computation
 # =========================
 def compute_stats(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     prices = [x["price_gbp"] for x in items if isinstance(x.get("price_gbp"), (int, float))]
-    if not prices:
-        return dict(median=None, p25=None, p75=None, used_count=0, prices=[])
-
     raw = prices[:]
+
+    # Soft clamp first to discard HTML misreads (e.g., £7,108.01)
+    clamped = [v for v in prices if CLAMP_MIN <= v <= CLAMP_MAX]
+    # If clamping kills too much, fall back to raw (we still have IQR below)
+    prices = clamped if len(clamped) >= max(6, len(raw)//3) else raw
+
     if ENABLE_OUTLIER_FILTER:
         prices = iqr_filter(prices)
 
-    return dict(
-        median=round(median(prices), 2) if prices else None,
-        p25=round(pct(prices, 25), 2) if prices else None,
-        p75=round(pct(prices, 75), 2) if prices else None,
-        used_count=len(prices),
-        prices=prices,
-        raw_count=len(raw),
-    )
+    if not prices:
+        return dict(median=None, p25=None, p75=None, used_count=0, raw_count=len(raw), prices=[])
 
+    return dict(
+        median=round(median(prices), 2),
+        p25=round(pct(prices, 25), 2),
+        p75=round(pct(prices, 75), 2),
+        used_count=len(prices),
+        raw_count=len(raw),
+        prices=prices,
+    )
 
 def get_comps(brand: str, item_type: str, size: str, colour: str) -> Dict[str, Any]:
     q = normalize_query(brand, item_type, size, colour)
@@ -348,22 +339,18 @@ def get_comps(brand: str, item_type: str, size: str, colour: str) -> Dict[str, A
         "examples": examples,
         "source": source,
         "outlier_filter": ENABLE_OUTLIER_FILTER,
+        "clamp": {"min": CLAMP_MIN, "max": CLAMP_MAX},
     }
 
     _cache[cache_key] = {"t": now_ts, "data": result}
     return result
 
-
 # =========================
-# Flask app & routes
+# Routes
 # =========================
-app = Flask(__name__)
-
-
 @app.get("/health")
 def health():
     return jsonify({"ok": True, "vinted_base": VINTED_BASE})
-
 
 def _params_from_request(req):
     brand = (req.args.get("brand") or "").strip()
@@ -372,7 +359,6 @@ def _params_from_request(req):
     colour = (req.args.get("colour") or "").strip()
     return brand, item_type, size, colour
 
-
 @app.get("/api/price")
 def api_price():
     brand, item_type, size, colour = _params_from_request(request)
@@ -380,11 +366,9 @@ def api_price():
     status = 200 if data.get("count") else 404
     return jsonify(data), status
 
-
 @app.get("/price")  # simple fallback/alias
 def price():
     return api_price()
-
 
 if __name__ == "__main__":
     # Local debug: Render runs via gunicorn, so this is ignored there
