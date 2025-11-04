@@ -194,7 +194,8 @@ def fetch_vinted_html(query, session):
         r = session.get(url, params=params, timeout=DEFAULT_TIMEOUT)
         if r.status_code != 200:
             return results
-        soup = BeautifulSoup(r.text, "lxml")
+        soup = BeautifulSoup(r.text, "html.parser")
+
 
         # Look for item cards. Vinted markup changes; we collect broadly.
         anchors = soup.select("a[href*='/items/']")
