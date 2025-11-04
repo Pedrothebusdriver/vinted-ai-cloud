@@ -1,77 +1,82 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Vinted Pi – Uploader</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { font-family: system-ui, Arial, sans-serif; margin: 1rem; }
-    header { display:flex; align-items:center; justify-content:space-between; }
-    .card { border:1px solid #ddd; border-radius:12px; padding:1rem; margin:.5rem 0; }
-    .row { display:flex; gap:.5rem; align-items:center; }
-    button { padding:.7rem 1rem; border-radius:10px; border:1px solid #ccc; background:#fff; }
-    .pill { font-size:.8rem; padding:.2rem .5rem; border-radius:999px; border:1px solid #ddd; }
-    .thumb { width:64px; height:64px; object-fit:cover; border-radius:8px; border:1px solid #ddd; }
-    .draft { display:flex; gap:.5rem; align-items:center; justify-content:space-between; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
+    h1 { margin: 0 0 12px; }
+    .row { display:flex; align-items:center; gap:12px; margin:12px 0 24px; }
+    input[type=file] { padding: 6px; }
+    button { padding: 8px 14px; border-radius: 10px; border: 1px solid #ddd; cursor: pointer; }
+    #chosen { color:#666; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap:12px; }
+    .card { border:1px solid #eee; border-radius:12px; padding:10px; text-decoration:none; color:inherit; }
+    .thumb { width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:8px; display:block; }
+    .pill { display:inline-block; font-size:12px; padding:2px 8px; border-radius:999px; background:#f3f3f3; margin-right:6px;}
+    .row small { color:#888; }
   </style>
 </head>
 <body>
-  <header>
-    <h2>Vinted Pi</h2>
-    <form id="uploadForm">
-      <input type="file" name="files" id="files" multiple accept="image/*" capture="environment" />
-      <button type="submit">Add Item</button>
-    </form>
-  </header>
+  <h1>Vinted Pi</h1>
 
-  <div id="status"></div>
+  <form id="uploadForm" action="/api/upload" method="post" enctype="multipart/form-data">
+    <div class="row">
+      <input id="files" name="files" type="file"
+             accept=".jpg,.jpeg,.png,.heic,.heif,.dng,.cr2,.nef,.arw,.rw2,.orf,.raf,image/*"
+             multiple />
+      <button id="addBtn" type="submit">Add Item</button>
+      <small id="chosen">No files chosen</small>
+    </div>
+  </form>
 
   <h3>Drafts</h3>
-  <div id="drafts"></div>
+  <div id="drafts" class="grid"></div>
 
-<script>
-async function refreshDrafts(){
-  const res = await fetch('/api/drafts');
-  const data = await res.json();
-  const wrap = document.getElementById('drafts');
-  wrap.innerHTML='';
-  data.forEach(d => {
-    const el = document.createElement('div');
-    el.className='card draft';
-    el.innerHTML = `
-      <div class="row">
-        ${(d.thumbs||[]).map(t=>`<img class='thumb' src='${t}' />`).join('')}
-        <div>
-          <div><strong>${d.title || '(no title yet)'}</strong></div>
-          <div class="row">
-            <span class="pill">Brand: ${d.brand?.value||'-'} (${d.brand?.confidence||'-'})</span>
-            <span class="pill">Size: ${d.size?.value||'-'} (${d.size?.confidence||'-'})</span>
-            <span class="pill">Type: ${d.item_type?.value||'-'} (${d.item_type?.confidence||'-'})</span>
-            <span class="pill">Colour: ${d.colour?.value||'-'} (${d.colour?.confidence||'-'})</span>
-          </div>
-        </div>
-      </div>
-      <div class="row">
-        <button onclick="location.href='/draft/'+${d.id}">Review</button>
-      </div>`;
-    wrap.appendChild(el);
-  })
-}
-refreshDrafts();
+  <script>
+  const files = document.getElementById('files');
+  const chosen = document.getElementById('chosen');
+  files.addEventListener('change', () => {
+    const n = files.files.length;
+    chosen.textContent = n ? `${n} file${n>1?'s':''} selected` : 'No files chosen';
+  });
 
-const form = document.getElementById('uploadForm');
-form.addEventListener('submit', async (e)=>{
-  e.preventDefault();
-  const files = document.getElementById('files').files;
-  if(!files.length){ alert('Pick some photos'); return; }
-  const fd = new FormData();
-  for (const f of files) fd.append('files', f);
-  const res = await fetch('/api/upload', { method: 'POST', body: fd });
-  const j = await res.json();
-  document.getElementById('status').textContent = j.message || 'Uploaded';
-  refreshDrafts();
-  form.reset();
-});
-</script>
+  // Guard submit if no files picked
+  document.getElementById('uploadForm').addEventListener('submit', (e) => {
+    if (!files.files.length) {
+      e.preventDefault();
+      alert('Please choose at least one photo (JPG/PNG/HEIC/DNG/RAW).');
+    }
+  });
+
+  // Load drafts list
+  async function loadDrafts() {
+    try {
+      const r = await fetch('/api/drafts', { cache: 'no-store' });
+      const data = await r.json();
+      const root = document.getElementById('drafts');
+      root.innerHTML = '';
+      for (const d of data) {
+        const a = document.createElement('a');
+        a.href = `/draft/${d.id}`;
+        a.className = 'card';
+        a.innerHTML = `
+          <img class="thumb" src="${(d.thumbs && d.thumbs[0]) || '/static/no-thumb.png'}" alt="">
+          <div style="margin-top:6px;">
+            <div style="font-weight:600;">#${d.id} ${(d.title||'').slice(0,40)}</div>
+            <div>
+              ${d.brand?.value ? `<span class="pill">${d.brand.value}</span>` : ''}
+              ${d.size?.value ? `<span class="pill">${d.size.value}</span>` : ''}
+            </div>
+          </div>`;
+        root.appendChild(a);
+      }
+    } catch (e) {
+      console.error('Failed to load drafts', e);
+    }
+  }
+  loadDrafts();
+  </script>
 </body>
 </html>
