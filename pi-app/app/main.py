@@ -29,12 +29,23 @@ app.mount('/static', StaticFiles(directory='static'), name='static')
 tmpl = Jinja2Templates(directory='templates')
 ocr = OCR()
 
+# ---------- Auto-init DB on startup ----------
+@app.on_event("startup")
+def _ensure_db_ready():
+    try:
+        from app import db as d
+        Path(d.DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+        init_db()
+    except Exception as e:
+        print("DB init warning:", e)
+
 # ---------- Image helpers (DNG/HEIC/RAW -> JPEG) ----------
 def _run_im_cmd(args: list[str]) -> bool:
     """Try ImageMagick (IM7 'magick' or IM6 'convert')."""
     for cmd in ('magick', 'convert'):
         try:
-            subprocess.run([cmd] + args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run([cmd] + args, check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
         except FileNotFoundError:
             continue
@@ -42,24 +53,63 @@ def _run_im_cmd(args: list[str]) -> bool:
             return False
     return False
 
+def _extract_dng_preview(src_path: Path, dst_path: Path) -> bool:
+    """
+    Fast path for iPhone/RAW DNG: extract the embedded JPEG preview using exiftool.
+    Returns True if a usable JPEG was written to dst_path.
+    """
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    candidates = [
+        ["exiftool", "-b", "-PreviewImage", str(src_path)],
+        ["exiftool", "-b", "-JpgFromRaw", str(src_path)],
+        ["exiftool", "-b", "-ThumbnailImage", str(src_path)],
+    ]
+    for cmd in candidates:
+        try:
+            data = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=15)
+            if data and len(data) > 10_000:  # avoid tiny thumbnails
+                with open(dst_path, "wb") as f:
+                    f.write(data)
+                return True
+        except Exception:
+            continue
+    return False
 
 def to_jpeg(src_path: Path, dst_path: Path) -> None:
-    """Convert any image to a resized JPEG (1600px max)."""
+    """Convert any image to a resized JPEG (1600px max). Prefers fast DNG preview."""
     dst_path.parent.mkdir(parents=True, exist_ok=True)
     ext = src_path.suffix.lower()
+
+    # Already a common raster? Use Pillow (fast + reliable)
     if ext in {'.jpg', '.jpeg', '.png'}:
         img = Image.open(src_path).convert('RGB')
         img.thumbnail((1600, 1600))
         img.save(dst_path, quality=85)
         return
-    # Use ImageMagick for DNG/HEIC/RAW/etc.
-    ok = _run_im_cmd([str(src_path), '-auto-orient', '-resize', '1600x1600>', '-quality', '85', str(dst_path)])
-    if not ok:
-        # Last-ditch Pillow attempt (may not work for RAW)
+
+    # FAST PATH for DNG: extract embedded preview with exiftool
+    if ext == '.dng':
+        if _extract_dng_preview(src_path, dst_path):
+            return
+        # Fall back to ImageMagick if preview not present
+        ok = _run_im_cmd([str(src_path), '-auto-orient', '-resize', '1600x1600>', '-quality', '85', str(dst_path)])
+        if ok:
+            return
+        # Last-ditch: Pillow (may fail on RAW)
         img = Image.open(src_path).convert('RGB')
         img.thumbnail((1600, 1600))
         img.save(dst_path, quality=85)
+        return
 
+    # HEIC/RAW and other formats – try ImageMagick first
+    ok = _run_im_cmd([str(src_path), '-auto-orient', '-resize', '1600x1600>', '-quality', '85', str(dst_path)])
+    if ok:
+        return
+
+    # Fallback to Pillow if IM fails
+    img = Image.open(src_path).convert('RGB')
+    img.thumbnail((1600, 1600))
+    img.save(dst_path, quality=85)
 
 def make_thumb(jpeg_path: Path, thumb_path: Path) -> None:
     thumb_path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,12 +118,10 @@ def make_thumb(jpeg_path: Path, thumb_path: Path) -> None:
         img.thumbnail((128, 128))
         img.save(thumb_path, quality=70)
 
-
 # ---------- Routes ----------
 @app.get('/', response_class=HTMLResponse)
 def home(request: Request):
     return tmpl.TemplateResponse('index.html', {'request': request})
-
 
 @app.get('/draft/{item_id}', response_class=HTMLResponse)
 def view_draft(item_id: int, request: Request):
@@ -94,7 +142,6 @@ def view_draft(item_id: int, request: Request):
     }
     return tmpl.TemplateResponse('draft.html', {'request': request, 'd': d})
 
-
 @app.get('/api/drafts')
 def list_drafts():
     with connect() as c:
@@ -114,7 +161,6 @@ def list_drafts():
             'thumbs': [f'/static/thumbs/{Path(p["optimised_path"]).stem}.jpg' for p in photos]
         })
     return resp
-
 
 @app.post('/api/upload')
 async def upload(files: list[UploadFile] = File(...)):
@@ -186,7 +232,6 @@ async def upload(files: list[UploadFile] = File(...)):
 
     return {'message': f'Created draft #{item_id}', 'item_id': item_id}
 
-
 @app.post('/api/draft/{item_id}/save')
 async def save_draft(item_id: int, title: str = Form(''), brand: str = Form(''), size: str = Form(''),
                      item_type: str = Form(''), colour: str = Form(''), condition: str = Form(''), price: str = Form('')):
@@ -198,7 +243,6 @@ async def save_draft(item_id: int, title: str = Form(''), brand: str = Form(''),
                       (item_id, k, v, 'User'))
         c.commit()
     return RedirectResponse(url=f'/draft/{item_id}', status_code=303)
-
 
 @app.post('/api/draft/{item_id}/check_price')
 async def check_price(item_id: int):
