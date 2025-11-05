@@ -1,52 +1,82 @@
-<script type="text/plain" data-filename="pi-app/templates/draft.html">
-<option>New with tags</option>
-<option>New without tags</option>
-<option>Very good</option>
-<option>Good</option>
-<option>Fair</option>
-</select>
+<!doctype html>
+<html lang="en"><head>
+  <meta charset="utf-8" />
+  <title>Draft #{{ d.id }} — Vinted Pi</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --border:#e9e9e9; --muted:#777; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; }
+    h1 { margin: 0 0 10px; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .panel { border:1px solid var(--border); border-radius:12px; padding:12px; }
+    .thumbs { display:grid; grid-template-columns: repeat(auto-fill, minmax(120px,1fr)); gap:8px; }
+    .thumb { width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:8px; background:#f6f6f6; }
+    label { display:block; font-size:13px; color:#444; margin:8px 0 4px; }
+    input, select { width:100%; padding:8px; border:1px solid var(--border); border-radius:8px; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .muted { color:var(--muted); font-size:12px; }
+    button { padding:8px 12px; border:1px solid var(--border); border-radius:10px; background:#fff; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <h1>Draft #{{ d.id }}</h1>
+  <div class="grid">
+    <div class="panel">
+      <div class="thumbs">
+        {% for t in d.thumbs %}
+          <img class="thumb" src="{{ t }}" />
+        {% endfor %}
+      </div>
+      <div style="margin-top:10px" class="row">
+        <a href="/draft/{{ d.id }}/export"><button>Download Listing Pack (ZIP)</button></a>
+        <button id="copyTitle">Copy Title</button>
+        <button id="copyDesc">Copy Description</button>
+        <a href="https://www.vinted.co.uk/items/new" target="_blank"><button>Open Vinted → Sell</button></a>
+      </div>
+      <div class="muted" style="margin-top:6px">Download images + paste title/description in Vinted. Review before posting.</div>
+    </div>
 
-
-<label>Price (£)</label>
-<input id="price" name="price" value="{{ '%.2f' % d.rec_price if d.rec_price else '' }}" placeholder="e.g., 12.00" />
-
-
-<div class="row" style="margin-top:10px">
-<button type="submit">Save</button>
-<form action="/api/draft/{{ d.id }}/check_price" method="post" style="display:inline">
-<button formaction="/api/draft/{{ d.id }}/check_price" formmethod="post">Check Price</button>
-</form>
-</div>
-</form>
-</div>
-</div>
-
-
-<script>
-const titleEl = document.getElementById('title');
-const brandEl = document.getElementById('brand');
-const sizeEl = document.getElementById('size');
-const typeEl = document.getElementById('item_type');
-const colourEl= document.getElementById('colour');
-
-
-function buildDescription(){
-const bits = [];
-if (brandEl.value) bits.push(`Brand: ${brandEl.value}`);
-if (sizeEl.value) bits.push(`Size: ${sizeEl.value}`);
-if (typeEl.value) bits.push(`Type: ${typeEl.value}`);
-if (colourEl.value) bits.push(`Colour: ${colourEl.value}`);
-return bits.join('\n');
-}
-
-
-document.getElementById('copyTitle').onclick = async ()=>{
-try { await navigator.clipboard.writeText(titleEl.value || ''); alert('Title copied'); } catch(e){ alert('Copy failed'); }
-};
-document.getElementById('copyDesc').onclick = async ()=>{
-try { await navigator.clipboard.writeText(buildDescription()); alert('Description copied'); } catch(e){ alert('Copy failed'); }
-};
-</script>
-</body>
-</html>
-</script>
+    <div class="panel">
+      <form action="/api/draft/{{ d.id }}/save" method="post">
+        <label>Title</label>
+        <input id="title" name="title" value="{{ d.title }}" placeholder="e.g., Nike Hoodie Black Size M" />
+        <label>Brand</label>
+        <input id="brand" name="brand" value="{{ d.brand.value if d.brand else '' }}" />
+        <label>Size</label>
+        <input id="size" name="size" value="{{ d.size.value if d.size else '' }}" />
+        <label>Item Type</label>
+        <input id="item_type" name="item_type" value="{{ d.item_type.value if d.item_type else '' }}" />
+        <label>Colour</label>
+        <input id="colour" name="colour" value="{{ d.colour.value if d.colour else '' }}" />
+        <label>Condition</label>
+        <select name="condition">
+          <option value="">—</option>
+          <option>New with tags</option><option>New without tags</option>
+          <option>Very good</option><option>Good</option><option>Fair</option>
+        </select>
+        <label>Price (£)</label>
+        <input id="price" name="price" value="{{ '%.2f' % d.rec_price if d.rec_price else '' }}" placeholder="e.g., 12.00" />
+        <div class="row" style="margin-top:10px">
+          <button type="submit">Save</button>
+          <button formaction="/api/draft/{{ d.id }}/check_price" formmethod="post">Check Price</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <script>
+    const titleEl = document.getElementById('title');
+    const brandEl = document.getElementById('brand');
+    const sizeEl  = document.getElementById('size');
+    const typeEl  = document.getElementById('item_type');
+    const colourEl= document.getElementById('colour');
+    function buildDescription(){
+      const bits=[]; if(brandEl.value) bits.push(`Brand: ${brandEl.value}`);
+      if(sizeEl.value) bits.push(`Size: ${sizeEl.value}`);
+      if(typeEl.value) bits.push(`Type: ${typeEl.value}`);
+      if(colourEl.value) bits.push(`Colour: ${colourEl.value}`);
+      return bits.join('\n');
+    }
+    document.getElementById('copyTitle').onclick=async()=>{try{await navigator.clipboard.writeText(titleEl.value||'');alert('Title copied');}catch(e){alert('Copy failed');}};
+    document.getElementById('copyDesc').onclick=async()=>{try{await navigator.clipboard.writeText(buildDescription());alert('Description copied');}catch(e){alert('Copy failed');}};
+  </script>
+</body></html>
