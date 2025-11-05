@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Request, Form, BackgroundTasks
+from app.export import build_listing_pack
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -451,3 +452,6 @@ async def check_price(item_id: int):
                           (item_id, ex.get('title',''), int(float(ex.get('price_gbp',0))*100), ex.get('url','')))
             c.commit()
     return RedirectResponse(url=f'/draft/{item_id}', status_code=303)
+@app.get('/draft/{item_id}/export')
+def export_draft(item_id: int):
+    return build_listing_pack(item_id)
