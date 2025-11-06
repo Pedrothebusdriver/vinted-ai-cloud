@@ -3,13 +3,17 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch: {}
+  workflow_call: {}   # <— lets other workflows call this one
+
+concurrency:
+  group: pi-deploy
+  cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: [ self-hosted, pi ]
     timeout-minutes: 20
     env:
-      # Needed for systemd --user from a headless runner session
       XDG_RUNTIME_DIR: /run/user/1000
       DBUS_SESSION_BUS_ADDRESS: unix:path=/run/user/1000/bus
 
@@ -35,7 +39,6 @@ jobs:
           set -euo pipefail
           systemctl --user daemon-reload || true
           systemctl --user restart vinted-app.service || systemctl --user start vinted-app.service
-          # warm-up retry until the socket is live
           for i in {1..15}; do
             curl -fsS 127.0.0.1:8080/health && break
             sleep 1
@@ -56,7 +59,6 @@ jobs:
           STATUS="${{ job.status }}"
           MSG="Pi-Vinted: ${STATUS} on main@${SHA}"
 
-          # On failure, attach recent logs as a file to the webhook
           if [ "$STATUS" != "success" ]; then
             {
               echo "== systemctl status vinted-app =="
