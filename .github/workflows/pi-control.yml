@@ -10,98 +10,79 @@ permissions:
 
 jobs:
   control:
-    # Only react to repo Issues (not PRs), from you/your org, and only if a command word is present
-    if: >
-      github.event.issue.pull_request == null &&
-      (github.event.comment.author_association == 'OWNER' ||
-       github.event.comment.author_association == 'MEMBER') &&
-      (contains(github.event.comment.body, '/deploy') ||
-       contains(github.event.comment.body, '/uitest') ||
-       contains(github.event.comment.body, '/status'))
+    if: |
+      github.event.issue.number == 1 &&
+      (startsWith(github.event.comment.body, '/deploy') ||
+       startsWith(github.event.comment.body, '/uitest') ||
+       startsWith(github.event.comment.body, '/status'))
     runs-on: [self-hosted, pi]
     env:
-      APP_DIR: /home/pi/vinted-ai-cloud/pi-app
       XDG_RUNTIME_DIR: /run/user/1000
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+    concurrency:
+      group: pi-control
+      cancel-in-progress: true
     steps:
-      - name: Context
-        id: ctx
-        run: |
-          set -euo pipefail
-          cd "$APP_DIR"
-          BRANCH=$(git rev-parse --abbrev-ref HEAD || echo main)
-          SHA=$(git rev-parse --short HEAD || echo unknown)
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-          echo "sha=$SHA" >> $GITHUB_OUTPUT
+      - name: Acknowledge on GitHub
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const cmd = context.payload.comment.body.trim();
+            github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: `⏱️ Received **${cmd}** — running on the Pi…`
+            });
 
-      - name: Load Discord webhook (from .env on the Pi)
-        id: env
+      - name: Run /status
+        if: startsWith(github.event.comment.body, '/status')
+        shell: bash
         run: |
           set -euo pipefail
-          if [ -f "$APP_DIR/.env" ]; then
-            # shellcheck disable=SC2046
-            export $(grep -E '^(DISCORD_WEBHOOK_URL)=' "$APP_DIR/.env" | xargs) || true
-          fi
-          echo "WEBHOOK=${DISCORD_WEBHOOK_URL:-}" >> $GITHUB_OUTPUT
+          echo "Checking vinted-app + endpoints…"
+          systemctl --user status vinted-app.service || true
+          curl -sS 127.0.0.1:8080/health || true
+          curl -sS 127.0.0.1:8080/openapi.json | jq -r '"/admin routes: " + ( [ .paths | keys[] | select(startswith("/admin/")) ] | join(", ") )' || true
 
-      - name: Handle /status
-        if: contains(github.event.comment.body, '/status')
+      - name: Run /deploy
+        if: startsWith(github.event.comment.body, '/deploy')
+        shell: bash
         run: |
           set -euo pipefail
-          systemctl --user status vinted-app.service --no-pager -l | tail -n +1 > /tmp/status.txt || true
-          curl -fsS 127.0.0.1:8080/health -o /tmp/health.json || echo '{}' > /tmp/health.json
-          echo "== HEALTH =="; cat /tmp/health.json
-          echo "== STATUS =="
-          tail -n 80 /tmp/status.txt
-          if [ -n "${{ steps.env.outputs.WEBHOOK }}" ]; then
-            curl -s -H 'Content-Type: application/json' \
-              -d "$(jq -nc --arg c "Pi-Vinted /status on ${{ steps.ctx.outputs.branch }}@${{ steps.ctx.outputs.sha }}\n\`\`\`$(tail -n 30 /tmp/status.txt)\n\`\`\`" '{content:$c}')" \
-              "${{ steps.env.outputs.WEBHOOK }}" >/dev/null || true
-          fi
-
-      - name: Handle /deploy (pull main, restart, smoke)
-        if: contains(github.event.comment.body, '/deploy')
-        run: |
-          set -euo pipefail
-          cd "$APP_DIR"
+          cd ~/vinted-ai-cloud
           git fetch --prune origin
           git reset --hard origin/main
+          cd ~/vinted-ai-cloud/pi-app
+          python3 -m venv .venv 2>/dev/null || true
+          . .venv/bin/activate
+          pip install -U pip
+          pip install -r requirements.txt
           systemctl --user daemon-reload
           systemctl --user restart vinted-app.service
           sleep 2
-          curl -fsS 127.0.0.1:8080/health -o /tmp/health.json
-          curl -fsS 127.0.0.1:8080/api/smoke/run -o /tmp/smoke.json || echo '{}' > /tmp/smoke.json
-          echo "Deploy health:"; cat /tmp/health.json
-          echo "Smoke:"; head -c 400 /tmp/smoke.json; echo
-          MSG_OK=$(jq -r '.ok // false' /tmp/smoke.json 2>/dev/null || echo false)
-          if [ -n "${{ steps.env.outputs.WEBHOOK }}" ]; then
-            curl -s -H 'Content-Type: application/json' \
-              -d "$(jq -nc --arg c "Pi-Vinted: deploy on main → ok: $MSG_OK\n\`\`\`$(systemctl --user status vinted-app.service --no-pager | tail -n 30)\n\`\`\`" '{content:$c}')" \
-              "${{ steps.env.outputs.WEBHOOK }}" >/dev/null || true
-          fi
+          curl -sS 127.0.0.1:8080/health
 
-      - name: Handle /uitest (headless screenshots)
-        if: contains(github.event.comment.body, '/uitest')
+      - name: Run /uitest
+        if: startsWith(github.event.comment.body, '/uitest')
+        shell: bash
         run: |
           set -euo pipefail
-          curl -fsS 127.0.0.1:8080/api/uitest/run -o /tmp/uitest.json
-          echo "UI:"; cat /tmp/uitest.json
-          # Optional: copy shots into static so you can open them via the browser quickly
-          for p in $(jq -r '.shots[]?' /tmp/uitest.json 2>/dev/null); do
-            b=$(basename "$p"); cp "$p" "$APP_DIR/static/$b" || true
-          done
-          if [ -n "${{ steps.env.outputs.WEBHOOK }}" ]; then
-            curl -s -H 'Content-Type: application/json' \
-              -d "$(jq -nc --arg c "Pi-Vinted: uitest done on ${{ steps.ctx.outputs.branch }}@${{ steps.ctx.outputs.sha }}\n$(jq -c . /tmp/uitest.json | head -c 800)" '{content:$c}')" \
-              "${{ steps.env.outputs.WEBHOOK }}" >/dev/null || true
-          fi
+          curl -sS 127.0.0.1:8080/api/uitest/run | tee /tmp/uitest.json
+          jq -r '.shots[]? // empty' /tmp/uitest.json | xargs -r -I{} echo "::notice::Saved {}"
 
-      - name: Comment back on the issue (summary)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Post result to GitHub + Discord
+        if: always()
+        shell: bash
         run: |
-          set -euo pipefail
-          BODY="Handled: $(echo "${{ github.event.comment.body }}" | tr -d '\r') on ${{ steps.ctx.outputs.branch }}@${{ steps.ctx.outputs.sha }}"
-          API="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/issues/${{ github.event.issue.number }}/comments"
-          printf '%s' "$BODY" | jq -Rs '{body:.}' | \
-            curl -s -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' \
-                 -d @- "$API" >/dev/null
+          # Summarise
+          STATUS="${{ job.status }}"
+          LOG_SNIP="$(journalctl --user -u vinted-app.service -n 30 --no-pager 2>/dev/null || true)"
+          echo "Status: $STATUS"
+          # GitHub note
+          gh api repos/${{ github.repository }}/issues/1/comments \
+            -f body="$(printf 'Result: **%s**\n\n```\n%s\n```' "$STATUS" "$LOG_SNIP")"
+          # Discord
+          if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+            printf '{"content":"**Pi Control**: %s\\n```%s```"}' "$STATUS" "$(echo "$LOG_SNIP" | sed 's/"/\"/g')" \
+              | curl -sS -H 'Content-Type: application/json' -d @- "$DISCORD_WEBHOOK_URL" >/dev/null || true
+          fi
