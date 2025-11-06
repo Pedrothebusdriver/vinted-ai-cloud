@@ -9,8 +9,10 @@ jobs:
     runs-on: [ self-hosted, pi ]
     timeout-minutes: 20
     env:
-      # systemd --user needs this when running headless as a service
+      # Needed for systemd --user from a headless runner session
       XDG_RUNTIME_DIR: /run/user/1000
+      DBUS_SESSION_BUS_ADDRESS: unix:path=/run/user/1000/bus
+
     steps:
       - name: Pull latest code on the Pi
         run: |
@@ -28,12 +30,16 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Restart app
+      - name: Restart app (systemd user service)
         run: |
           set -euo pipefail
           systemctl --user daemon-reload || true
-          systemctl --user restart vinted-app.service
-          sleep 2
+          systemctl --user restart vinted-app.service || systemctl --user start vinted-app.service
+          # warm-up retry until the socket is live
+          for i in {1..15}; do
+            curl -fsS 127.0.0.1:8080/health && break
+            sleep 1
+          done
 
       - name: Smoke checks (health + headless UI)
         run: |
@@ -41,15 +47,34 @@ jobs:
           curl -fsS 127.0.0.1:8080/health
           curl -fsS 127.0.0.1:8080/api/uitest/run
 
-      - name: Discord notify (always)
+      - name: Discord notify (success or failure)
         if: always()
         run: |
           set +e
           source ~/vinted-ai-cloud/pi-app/.env 2>/dev/null || true
-          STATUS="${{ job.status }}"
           SHA=$(cd ~/vinted-ai-cloud && git rev-parse --short HEAD)
+          STATUS="${{ job.status }}"
           MSG="Pi-Vinted: ${STATUS} on main@${SHA}"
+
+          # On failure, attach recent logs as a file to the webhook
+          if [ "$STATUS" != "success" ]; then
+            {
+              echo "== systemctl status vinted-app =="
+              systemctl --user status vinted-app.service --no-pager -l || true
+              echo
+              echo "== journalctl tail =="
+              journalctl --user -u vinted-app.service -n 200 --no-pager || true
+              echo
+              echo "== curl /health =="
+              curl -sS 127.0.0.1:8080/health || true
+            } > /tmp/deploy.log
+          fi
+
           if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
-            curl -s -H 'Content-Type: application/json' \
-              -d "{\"content\":\"${MSG}\"}" "$DISCORD_WEBHOOK_URL" >/dev/null
+            if [ -s /tmp/deploy.log ]; then
+              curl -s -F "content=${MSG}" -F "file=@/tmp/deploy.log" "$DISCORD_WEBHOOK_URL" >/dev/null
+            else
+              curl -s -H 'Content-Type: application/json' \
+                -d "{\"content\":\"${MSG}\"}" "$DISCORD_WEBHOOK_URL" >/dev/null
+            fi
           fi
