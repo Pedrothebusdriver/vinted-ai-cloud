@@ -1,0 +1,55 @@
+name: Pi Deploy & Test
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: [ self-hosted, pi ]
+    timeout-minutes: 20
+    env:
+      # systemd --user needs this when running headless as a service
+      XDG_RUNTIME_DIR: /run/user/1000
+    steps:
+      - name: Pull latest code on the Pi
+        run: |
+          set -euo pipefail
+          cd ~/vinted-ai-cloud
+          git fetch --prune origin
+          git reset --hard origin/main
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          cd ~/vinted-ai-cloud/pi-app
+          python3 -m venv .venv || true
+          . .venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Restart app
+        run: |
+          set -euo pipefail
+          systemctl --user daemon-reload || true
+          systemctl --user restart vinted-app.service
+          sleep 2
+
+      - name: Smoke checks (health + headless UI)
+        run: |
+          set -euo pipefail
+          curl -fsS 127.0.0.1:8080/health
+          curl -fsS 127.0.0.1:8080/api/uitest/run
+
+      - name: Discord notify (always)
+        if: always()
+        run: |
+          set +e
+          source ~/vinted-ai-cloud/pi-app/.env 2>/dev/null || true
+          STATUS="${{ job.status }}"
+          SHA=$(cd ~/vinted-ai-cloud && git rev-parse --short HEAD)
+          MSG="Pi-Vinted: ${STATUS} on main@${SHA}"
+          if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+            curl -s -H 'Content-Type: application/json' \
+              -d "{\"content\":\"${MSG}\"}" "$DISCORD_WEBHOOK_URL" >/dev/null
+          fi
