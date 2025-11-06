@@ -1,0 +1,27 @@
+name: Pi Command Listener
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch: {}   # optional manual run for testing
+
+permissions:
+  contents: read
+
+jobs:
+  # /deploy in a comment calls the reusable deploy workflow above
+  deploy-on-command:
+    if: contains(github.event.comment.body, '/deploy')
+    uses: ./.github/workflows/pi-deploy.yml
+    secrets: inherit
+
+  # /uitest runs just the headless UI screenshots (quick sanity)
+  uitest-on-command:
+    if: contains(github.event.comment.body, '/uitest')
+    runs-on: [ self-hosted, pi ]
+    steps:
+      - name: UI test (home + latest draft)
+        run: |
+          set -euo pipefail
+          curl -fsS 127.0.0.1:8080/health
+          curl -fsS 127.0.0.1:8080/api/uitest/run
