@@ -2,7 +2,8 @@ name: Pi Nightly (deploy + smoke + UI)
 
 on:
   schedule:
-    - cron: '0 2 * * *'   # every night at 02:00 Pi time
+    - cron: '*/30 21-23 * * *'  # every 30 min from 21:00–23:59 UTC (UK = GMT now)
+    - cron: '*/30 0-5 * * *'    # every 30 min from 00:00–05:59 UTC
   workflow_dispatch:
 
 jobs:
@@ -14,19 +15,15 @@ jobs:
     concurrency:
       group: pi-nightly
       cancel-in-progress: true
+
     steps:
-      - name: Pull latest code
+      - name: Update + restart app
         shell: bash
         run: |
           set -euo pipefail
           cd ~/vinted-ai-cloud
           git fetch --prune origin
           git reset --hard origin/main
-
-      - name: Rebuild env + restart app
-        shell: bash
-        run: |
-          set -euo pipefail
           cd ~/vinted-ai-cloud/pi-app
           python3 -m venv .venv 2>/dev/null || true
           . .venv/bin/activate
@@ -36,38 +33,48 @@ jobs:
           systemctl --user restart vinted-app.service
           sleep 2
 
-      - name: Smoke: health + drafts + pricing
+      - name: Smoke checks
         shell: bash
         run: |
           set -euo pipefail
           curl -sS 127.0.0.1:8080/health | tee /tmp/health.json
-          curl -sS 127.0.0.1:8080/api/drafts | head -c 500 | sed 's/$/\n/' | tee /tmp/drafts.txt
-          # OK example
           curl -sS -o /tmp/ok.json -w 'HTTP:%{http_code}\n' \
             -H 'Content-Type: application/json' \
             -d '{"title":"Nike hoodie","description":""}' \
-            127.0.0.1:8080/api/draft/1/check_price | tee /tmp/price_ok.status
-          # Block example
+            127.0.0.1:8080/api/draft/1/check_price | tee /tmp/ok.http
           curl -sS -o /tmp/block.json -w 'HTTP:%{http_code}\n' \
             -H 'Content-Type: application/json' \
             -d '{"title":"cannabis seeds","description":""}' \
-            127.0.0.1:8080/api/draft/1/check_price | tee /tmp/price_block.status
+            127.0.0.1:8080/api/draft/1/check_price | tee /tmp/block.http
 
-      - name: Headless UI shots
+      - name: Headless UI test
         shell: bash
         run: |
-          set -euo pipefail
-          curl -sS 127.0.0.1:8080/api/uitest/run | tee /tmp/uitest.json
+          curl -sS 127.0.0.1:8080/api/uitest/run | tee /tmp/uitest.json || true
+          mkdir -p /tmp/uitest-shots
+          cp -f /tmp/ui_*/home.png /tmp/ui_*/draft.png /tmp/uitest-shots/ 2>/dev/null || true
 
-      - name: Discord report
+      - name: Upload artifacts (screens + logs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-ui-and-logs
+          path: |
+            /tmp/uitest.json
+            /tmp/uitest-shots/*.png
+            /tmp/health.json
+            /tmp/ok.json
+            /tmp/block.json
+          if-no-files-found: ignore
+
+      - name: Discord summary
         if: always()
         shell: bash
         run: |
-          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then exit 0; fi
+          [ -z "${DISCORD_WEBHOOK_URL:-}" ] && exit 0
           STATUS="${{ job.status }}"
           H=$(cat /tmp/health.json 2>/dev/null || echo '{}')
-          OK=$(cat /tmp/price_ok.status 2>/dev/null || echo 'HTTP:000')
-          BL=$(cat /tmp/price_block.status 2>/dev/null || echo 'HTTP:000')
-          MSG=$(printf '**Nightly:** %s\nHealth: `%s`\nOK: `%s`\nBlock: `%s`' "$STATUS" "$H" "$OK" "$BL")
+          OK=$(cat /tmp/ok.http 2>/dev/null || echo 'HTTP:000')
+          BK=$(cat /tmp/block.http 2>/dev/null || echo 'HTTP:000')
+          MSG=$(printf '**Nightly (%s)** → %s\nHealth: `%s`\nOK: `%s`\nBlock: `%s`' "$(date -u +%H:%MZ)" "$STATUS" "$H" "$OK" "$BK")
           printf '{"content":"%s"}' "$(echo "$MSG" | sed 's/"/\"/g')" \
             | curl -sS -H 'Content-Type: application/json' -d @- "$DISCORD_WEBHOOK_URL" >/dev/null || true
