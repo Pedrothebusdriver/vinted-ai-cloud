@@ -1,0 +1,36 @@
+name: Sampler (Openverse) — Download & Report
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  sampler:
+    runs-on: [self-hosted, pi]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configure git
+        run: |
+          git config user.name  "${{ secrets.GH_AGENT_NAME || 'pi-agent' }}"
+          git config user.email "${{ secrets.GH_AGENT_EMAIL || 'pi@local' }}"
+
+      - name: Download images on the Pi
+        run: bash scripts/sampler_run.sh
+
+      - name: Commit summary only (no images)
+        run: |
+          git add .agent/sampler/summary-*.json
+          if git diff --cached --quiet; then
+            echo "No new summary to commit."
+            exit 0
+          fi
+          MSG="sampler: $(date -u +%Y-%m-%dT%H:%M:%SZ) downloaded images"
+          git commit -m "$MSG"
+
+      - name: Push using PAT
+        env:
+          GH_PAT: ${{ secrets.GH_AGENT_PAT }}
+        run: |
+          git push https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git HEAD:main
