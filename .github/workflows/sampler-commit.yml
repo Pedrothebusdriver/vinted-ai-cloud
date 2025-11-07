@@ -1,0 +1,84 @@
+name: Sampler (Openverse) — Commit Manifest
+on:
+  workflow_dispatch: {}   # click "Run workflow" to test; we'll cron it after
+
+jobs:
+  sample:
+    runs-on: [self-hosted, pi]
+    steps:
+      - name: Checkout (no built-in creds)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name  "${{ secrets.GH_AGENT_NAME || 'pi-agent' }}"
+          git config user.email "${{ secrets.GH_AGENT_EMAIL || 'pi@local' }}"
+
+      - name: Fetch a few CC0 samples per bucket and write manifest
+        run: |
+          set -euo pipefail
+          mkdir -p .agent/sampler
+          TS="$(date -u +%Y%m%dT%H%M%SZ)"
+          OUT=".agent/sampler/manifest-${TS}.json"
+          PYTHONUNBUFFERED=1 python - <<'PY'
+import json, urllib.parse, urllib.request, ssl, time
+ssl._create_default_https_context = ssl._create_unverified_context
+
+buckets = ["jackets","shoes","bags"]
+def openverse(q, n=3):
+    qparams = urllib.parse.urlencode({
+        "q": q, "license": "cc0", "license_type": "cc0",
+        "page_size": n, "format": "json"
+    })
+    url = f"https://api.openverse.engineering/v1/images/?{qparams}"
+    with urllib.request.urlopen(url, timeout=20) as r:
+        data = json.load(r)
+    items = []
+    for it in data.get("results", []):
+        items.append({
+            "id": it.get("id"),
+            "title": it.get("title"),
+            "url": it.get("url"),
+            "thumbnail": it.get("thumbnail"),
+            "source": it.get("source"),
+        })
+    return items
+
+report = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+          "source": "openverse", "buckets": {}}
+
+for b in buckets:
+    try:
+        report["buckets"][b] = openverse(b, 3)
+    except Exception as e:
+        report["buckets"][b] = {"error": repr(e), "items": []}
+
+import os
+os.makedirs(".agent/sampler", exist_ok=True)
+with open(os.environ.get("OUT", ".agent/sampler/manifest.json"), "w", encoding="utf-8") as f:
+    json.dump(report, f, indent=2, ensure_ascii=False)
+print("WROTE", os.environ.get("OUT", ".agent/sampler/manifest.json"))
+PY
+        env:
+          OUT: ${{ github.workspace }}/.agent/sampler/manifest-${{ github.run_id }}.json
+
+      - name: Commit
+        run: |
+          set -euo pipefail
+          git add .agent/sampler/*.json
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"; exit 1
+          fi
+          git commit -m "agent: sampler manifest $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git log -1 --name-only
+
+      - name: Push using PAT
+        env:
+          GH_PAT: ${{ secrets.GH_AGENT_PAT }}
+        run: |
+          set -euo pipefail
+          git push "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git" HEAD:main
+          echo "PUSHED OK"
