@@ -1,8 +1,14 @@
 name: Eval & Report (Discord)
-on: { workflow_dispatch: {} }
+
+on:
+  workflow_dispatch: {}
+  workflow_run:
+    workflows: ["Sampler (Openverse) — Commit Manifest"]
+    types: [completed]
 
 jobs:
   eval:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success') }}
     runs-on: [self-hosted, pi]
     steps:
       - uses: actions/checkout@v4
@@ -15,61 +21,70 @@ jobs:
           set -euo pipefail
           f=$(ls -1 .agent/sampler/manifest-*.json 2>/dev/null | tail -n1 || true)
           if [ -z "${f:-}" ]; then
-            echo "No manifest found"; exit 1
+            echo "manifest=" >> "$GITHUB_OUTPUT"
+            echo "No manifest found."
+          else
+            echo "manifest=$f" >> "$GITHUB_OUTPUT"
+            echo "Using manifest: $f"
+            head -n 20 "$f" | sed 's/^/MANIFEST: /'
           fi
-          echo "manifest=$f" >> "$GITHUB_OUTPUT"
-          echo "Using manifest: $f"
 
       - name: Download a few images from manifest
+        if: ${{ steps.mf.outputs.manifest != '' }}
         id: grab
         env: { MF: ${{ steps.mf.outputs.manifest }} }
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, os, urllib.request as u, pathlib, random, sys
+          import json, os, urllib.request as u, random
           mf = os.environ["MF"]
           data = json.load(open(mf))
           items = []
           for b in data.get("buckets", []):
-              items += b.get("items", [])[:2]           # up to 2 per bucket
+              items += b.get("items", [])[:2]    # up to 2 per bucket
           random.shuffle(items)
-          items = items[:6]                             # at most 6 total
+          items = items[:6]                      # max 6 total
 
-          outdir = "/tmp/sampler"
-          os.makedirs(outdir, exist_ok=True)
+          outdir = "/tmp/sampler"; os.makedirs(outdir, exist_ok=True)
           kept = []
-          for i, it in enumerate(items):
-              url = it.get("url")
-              if not url: 
-                  continue
+          for i,it in enumerate(items):
+              url = it.get("url") or ""
+              if not url: continue
               fn = os.path.join(outdir, f"img{i}.jpg")
               try:
                   u.urlretrieve(url, fn)
-                  if os.path.getsize(fn) <= 8000000:   # Discord 8MB limit
+                  if os.path.getsize(fn) <= 8_000_000:
                       kept.append((fn, it.get("title",""), it.get("landing","")))
-              except Exception:
-                  pass
-          open(os.path.join(outdir,"list.txt"),"w").write(
-              "\n".join("\t".join([p,t,l]) for p,t,l in kept)
-          )
-          print(f"KEPT={len(kept)}")
+              except Exception: pass
+
+          with open(os.path.join(outdir,"list.txt"),"w") as f:
+              for p,t,l in kept: f.write("\t".join([p,t,l])+"\n")
+          print("KEPT", len(kept))
           PY
 
-      - name: Post images to Discord
+      - name: Post images (or a note) to Discord
         env:
           HOOK: ${{ secrets.DISCORD_WEBHOOK_AI_TEST }}
+        shell: bash
         run: |
           set -euo pipefail
           if [ -z "$HOOK" ]; then echo "Missing DISCORD_WEBHOOK_AI_TEST"; exit 1; fi
-          LIST=/tmp/sampler/list.txt
-          if [ ! -s "$LIST" ]; then echo "No images to post"; exit 0; fi
+          if [ ! -s /tmp/sampler/list.txt ]; then
+            curl -sS -H 'Content-Type: application/json' \
+                 -d '{"content":"ℹ️ Eval ran but found no manifest or no <8MB images."}' \
+                 "$HOOK" -o /dev/null
+            echo "Nothing to post"; exit 0
+          fi
           n=0
           while IFS=$'\t' read -r path title landing; do
             [ -f "$path" ] || continue
-            # keep payload simple to avoid JSON escape issues
             curl -sS -F "payload_json={\"content\":\"📷 Openverse sample\"}" \
-                      -F "file=@${path}" "$HOOK" -o /dev/null
+                     -F "file=@${path}" "$HOOK" -o /dev/null
             n=$((n+1))
-            [ $n -ge 3 ] && break   # post up to 3 previews per run
-          done < "$LIST"
+            [ $n -ge 3 ] && break
+          done < /tmp/sampler/list.txt
           echo "Posted $n image(s)"
+
+    concurrency:
+      group: eval-discord
+      cancel-in-progress: true
