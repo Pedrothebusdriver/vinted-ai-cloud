@@ -12,7 +12,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Configure git
+      - name: Configure git identity
         run: |
           git config user.name  "${{ secrets.GH_AGENT_NAME || 'pi-agent' }}"
           git config user.email "${{ secrets.GH_AGENT_EMAIL || 'pi@local' }}"
@@ -23,9 +23,8 @@ jobs:
           set -euo pipefail
           mkdir -p .agent/sampler
           python3 - <<'PY'
-          import json, urllib.request as u, urllib.parse as up, time, os, sys
+          import json, urllib.request as u, urllib.parse as up, time
 
-          # Buckets -> search query (edit anytime)
           BUCKETS = {
               "electronics/phones": "smartphone phone",
               "electronics/laptops": "laptop",
@@ -35,7 +34,7 @@ jobs:
               "bags": "handbag",
               "toys": "toy",
               "video-games": "video game",
-              "homeware": "homeware"
+              "homeware": "homeware",
           }
 
           def search(q, n=12):
@@ -47,7 +46,7 @@ jobs:
               items = []
               for i in data.get("results", []):
                   url = i.get("url") or i.get("thumbnail") or i.get("foreign_landing_url")
-                  if not url: 
+                  if not url:
                       continue
                   items.append({
                       "id": i.get("identifier"),
@@ -64,12 +63,11 @@ jobs:
           for bucket, query in BUCKETS.items():
               try:
                   items = search(query, 12)
-              except Exception as e:
+              except Exception:
                   items = []
-              if items:
-                  manifest["buckets"].append({
-                      "bucket": bucket, "query": query, "items": items
-                  })
+              manifest["buckets"].append({
+                  "bucket": bucket, "query": query, "items": items
+              })
 
           out = f".agent/sampler/manifest-{ts}.json"
           with open(out, "w", encoding="utf-8") as f:
@@ -78,20 +76,13 @@ jobs:
           PY
 
       - name: Show manifest summary
+        shell: bash
         run: |
           ls -lh .agent/sampler
-          head -n 50 .agent/sampler/manifest-*.json || true
+          echo "Preview:"
+          head -n 80 .agent/sampler/manifest-*.json || true
 
-
-      - name: Commit
-        run: |
-          git add .agent/sampler/*.json
-          if git diff --cached --quiet; then
-            echo "Nothing to commit"; exit 1
-          fi
-          git commit -m "agent: sampler manifest test $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          git log -1 --name-only
-      - name: Ensure sampler stub exists
+      - name: Ensure sampler stub exists (always)
         if: always()
         shell: bash
         run: |
@@ -100,9 +91,21 @@ jobs:
           date -u +"sampler manifest %Y-%m-%dT%H:%M:%SZ" > .agent/sampler/_stub.txt
           echo "Wrote .agent/sampler/_stub.txt"
 
+      - name: Commit sampler artifacts (no-fail if no changes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A .agent/sampler
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "agent: sampler manifest $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git log -1 --name-only --pretty=oneline
+          fi
+
       - name: Push using PAT
         env:
           GH_PAT: ${{ secrets.GH_AGENT_PAT }}
         run: |
           git push "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git" HEAD:main
-          echo "PUSHED OK"
+          echo "PUSHED OK (or already up to date)"
