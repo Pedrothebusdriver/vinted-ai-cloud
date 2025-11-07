@@ -35,7 +35,7 @@ jobs:
 
       - name: Post preview to Discord
         env:
-          WEBHOOK: ${{ secrets.DISCORD_AI_TEST_WEBHOOK }}
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_AI_TEST }}
           MANIFEST: ${{ steps.pick.outputs.manifest }}
         shell: bash
         run: |
