@@ -15,3 +15,7 @@ pi-app/static/thumbs/
 # OS junk
 .DS_Store
 Thumbs.db
+backups/
+pi-app/.env*
+pi-app/app/patch*/
+pi-app/tools/
