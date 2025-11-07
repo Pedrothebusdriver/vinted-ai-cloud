@@ -1,0 +1,37 @@
+name: Agent Commit Test
+on:
+  workflow_dispatch: {}
+
+jobs:
+  commit:
+    runs-on: [self-hosted, pi]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configure git
+        run: |
+          git config user.name  "${{ secrets.GH_AGENT_NAME || 'pi-agent' }}"
+          git config user.email "${{ secrets.GH_AGENT_EMAIL || 'pi@local' }}"
+
+      - name: Write heartbeat
+        run: |
+          mkdir -p data
+          echo "heartbeat $(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> data/agent-heartbeat.txt
+
+      - name: Commit
+        run: |
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No changes, skipping commit."
+          else
+            git add -A
+            git commit -m "agent: heartbeat"
+          fi
+
+      - name: Push using PAT
+        env:
+          GH_PAT: ${{ secrets.GH_AGENT_PAT }}
+        run: |
+          git push https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git HEAD:main
