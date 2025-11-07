@@ -1,0 +1,27 @@
+name: Repo Index (manifest)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 02 * * *"   # nightly 02:00 UTC
+
+jobs:
+  index:
+    runs-on: [self-hosted, pi]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build manifest
+        run: |
+          set -euo pipefail
+          printf "# Repository manifest\n\n" > MANIFEST.md
+          date -u +"Generated: %Y-%m-%d %H:%M:%SZ\n\n" >> MANIFEST.md
+          echo '```text' >> MANIFEST.md
+          git ls-files | sort >> MANIFEST.md
+          echo '```' >> MANIFEST.md
+      - name: Commit manifest
+        run: |
+          git config user.name "pi-agent"
+          git config user.email "pi@local"
+          git add MANIFEST.md
+          git commit -m "chore: refresh manifest" || echo "no changes"
+          git push
