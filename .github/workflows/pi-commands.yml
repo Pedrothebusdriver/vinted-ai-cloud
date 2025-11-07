@@ -1,0 +1,202 @@
+name: Pi Commands
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  control:
+    # Only react in Issue #1 and ignore bot/self comments
+    if: ${{ github.event.issue.number == 1 && github.event.comment.user.type != 'Bot' }}
+    runs-on: [self-hosted, pi]
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Parse command
+        id: cmd
+        run: |
+          C="$(echo "${{ github.event.comment.body }}" | tr -d '\r')"
+          echo "text<<TXT" >> $GITHUB_OUTPUT
+          echo "$C" >> $GITHUB_OUTPUT
+          echo "TXT" >> $GITHUB_OUTPUT
+          case "$C" in
+            /bootstrap-sampler* ) echo "mode=bootstrap" >> $GITHUB_OUTPUT ;;
+            "/sampler run"* )     echo "mode=run"       >> $GITHUB_OUTPUT ;;
+          esac
+
+      - name: Bootstrap sampler (create files & commit)
+        if: steps.cmd.outputs.mode == 'bootstrap'
+        run: |
+          set -euo pipefail
+          mkdir -p tools rules
+          # Use JSON (no extra deps) for sources/rules
+          [ -f rules/image_sources.json ] || cat > rules/image_sources.json <<'JSON'
+          {
+            "buckets": {
+              "electronics/phones":  {"queries": ["iphone", "android phone"]},
+              "electronics/laptops": {"queries": ["laptop", "notebook computer"]},
+              "shoes":               {"queries": ["sneakers", "running shoes"]},
+              "jackets":             {"queries": ["jacket clothing", "parka coat"]}
+            }
+          }
+          JSON
+
+          [ -f tools/sampler.py ] || cat > tools/sampler.py <<'PY'
+          #!/usr/bin/env python3
+          import os, sys, io, json, hashlib, time, datetime, urllib.parse, urllib.request
+          from PIL import Image
+
+          # ---- tiny helpers ----
+          def jload(p): return json.load(open(p, "r", encoding="utf-8"))
+          def jprint(d): sys.stdout.write(json.dumps(d, ensure_ascii=False)); sys.stdout.flush()
+          def mkdir(p): os.makedirs(p, exist_ok=True)
+          def nowdate(): return datetime.datetime.utcnow().strftime("%Y-%m-%d")
+
+          def fetch_json(url, timeout=10):
+            try:
+              req = urllib.request.Request(url, headers={"User-Agent":"PiSampler/1.0"})
+              with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode("utf-8","ignore"))
+            except Exception as e:
+              return {"_error": str(e)}
+
+          def dl(url, to, timeout=15):
+            try:
+              req = urllib.request.Request(url, headers={"User-Agent":"PiSampler/1.0"})
+              with urllib.request.urlopen(req, timeout=timeout) as r:
+                b = r.read()
+              open(to, "wb").write(b)
+              return True, len(b)
+            except Exception as e:
+              return False, str(e)
+
+          def ahash(p, size=8):
+            try:
+              im = Image.open(p).convert("L").resize((size,size))
+              px = list(im.getdata())
+              avg = sum(px)/len(px)
+              bits = "".join("1" if v>avg else "0" for v in px)
+              return hex(int(bits,2))[2:]
+            except Exception: return "0"
+
+          def valid_image(p, min_side=256, min_pixels=90_000):
+            try:
+              with Image.open(p) as im:
+                w,h = im.size
+                return min(w,h) >= min_side and (w*h) >= min_pixels
+            except Exception:
+              return False
+
+          # ---- providers ----
+          def openverse_urls(query, limit=10):
+            q=urllib.parse.quote(query)
+            url=f"https://api.openverse.engineering/v1/images/?q={q}&page_size={limit}&license_type=all"
+            data = fetch_json(url)
+            urls=[]
+            for it in (data.get("results") or []):
+              u = it.get("url") or it.get("thumbnail") or it.get("detail_url")
+              if u: urls.append(u)
+            return urls
+
+          def commons_urls(query, limit=10):
+            q=urllib.parse.quote(query)
+            url=( "https://commons.wikimedia.org/w/api.php?"
+                  "action=query&generator=search&gsrnamespace=6&gsrlimit=%d&gsrsearch=%s&"
+                  "prop=imageinfo&iiprop=url&format=json" % (limit, q) )
+            data = fetch_json(url)
+            urls=[]
+            pages=(data.get("query") or {}).get("pages") or {}
+            for _,p in pages.items():
+              ii = p.get("imageinfo") or []
+              if ii and ii[0].get("url"): urls.append(ii[0]["url"])
+            return urls
+
+          def collector(queries, per=6):
+            urls=[]
+            for q in queries:
+              urls += openverse_urls(q, per//2) + commons_urls(q, per//2)
+            # de-dup raw URLs
+            uniq=[]
+            seen=set()
+            for u in urls:
+              if u not in seen:
+                uniq.append(u); seen.add(u)
+            return uniq
+
+          # ---- main ----
+          def run(out_root="data/online-samples", limit=8):
+            cfg=jload("rules/image_sources.json")
+            date=nowdate()
+            stats={"date":date,"fetched":0,"kept":0,"deduped":0,"by_bucket":{}}
+            hset=set()
+            kept_files=[]
+            for bname, bucket in (cfg.get("buckets") or {}).items():
+              bstats={"fetched":0,"kept":0,"deduped":0}
+              urls=collector(bucket.get("queries",[]), per=max(2,limit))
+              mkdir(os.path.join(out_root, date, bname))
+              cnt=0
+              for u in urls:
+                if cnt>=limit: break
+                fn = hashlib.sha1(u.encode()).hexdigest()[:16] + os.path.splitext(urllib.parse.urlparse(u).path)[-1]
+                path = os.path.join(out_root, date, bname, fn if "." in fn else fn+".jpg")
+                ok, _ = dl(u, path)
+                if not ok: continue
+                bstats["fetched"] += 1; stats["fetched"] += 1
+                # dedupe by content sha1 + a-hash
+                raw = open(path,"rb").read()
+                sha = hashlib.sha1(raw).hexdigest()
+                ah  = ahash(path)
+                key = sha[:20]+":"+ah
+                if key in hset or not valid_image(path):
+                  os.remove(path); bstats["deduped"]+=1; stats["deduped"]+=1; continue
+                hset.add(key)
+                kept_files.append(path)
+                bstats["kept"]+=1; stats["kept"]+=1; cnt+=1
+              stats["by_bucket"][bname]=bstats
+            out={"ok":True, "summary":stats, "kept":kept_files[:32]}
+            jprint(out)
+
+          if __name__=="__main__":
+            out="data/online-samples"; limit=8
+            for i,a in enumerate(sys.argv[1:]):
+              if a=="--out": out=sys.argv[i+2]
+              if a=="--limit": limit=int(sys.argv[i+2])
+            run(out_root=out, limit=limit)
+          PY
+          chmod +x tools/sampler.py
+
+          git config user.email "bot@local"
+          git config user.name  "pi-runner"
+          git add -A
+          git commit -m "bootstrap: sampler + sources" || echo "Nothing to commit"
+          git push
+
+      - name: Run sampler
+        if: steps.cmd.outputs.mode == 'run'
+        env:
+          GH_HOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          # Fallback to .env (runner on Pi has it) if no GitHub secret
+          if [ -z "${GH_HOOK:-}" ] && [ -f ".env" ]; then . ./.env; GH_HOOK="${DISCORD_WEBHOOK_URL:-}"; fi
+          python3 -m venv .venv || true
+          . .venv/bin/activate
+          pip -q install pillow
+          OUT="$(python tools/sampler.py --out data/online-samples --limit 8 || echo '{}')"
+          echo "$OUT"
+          # Post compact Discord summary
+          python - "$GH_HOOK" <<'PY'
+import os,sys,json,urllib.request
+hook=sys.argv[1]
+try: data=json.loads(sys.stdin.read())
+except: data={"ok":False,"summary":{}}
+s=data.get("summary",{})
+msg=f"Sampler: fetched {s.get('fetched',0)} | kept {s.get('kept',0)} | deduped {s.get('deduped',0)}"
+if hook:
+  req=urllib.request.Request(hook, data=json.dumps({"content":msg}).encode("utf-8"),
+                             headers={"Content-Type":"application/json"})
+  urllib.request.urlopen(req,timeout=8).read()
+print(msg)
+PY
