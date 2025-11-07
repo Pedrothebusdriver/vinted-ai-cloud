@@ -1,0 +1,25 @@
+name: PAT Smoke
+on:
+  workflow_dispatch:
+
+jobs:
+  push:
+    runs-on: [self-hosted, pi]
+    steps:
+      - name: Checkout (uses PAT)
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_AGENT_PAT }}
+
+      - name: Create timestamp file
+        run: |
+          mkdir -p data/metrics
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/metrics/pat_smoke.txt
+
+      - name: Commit & push
+        run: |
+          git config user.name "pi-agent"
+          git config user.email "pi@local"
+          git add data/metrics/pat_smoke.txt
+          git commit -m "ci: PAT smoke ($(date -u +%H:%M:%SZ))" || echo "nothing to commit"
+          git push
