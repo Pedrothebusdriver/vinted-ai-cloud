@@ -91,6 +91,14 @@ jobs:
           fi
           git commit -m "agent: sampler manifest test $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git log -1 --name-only
+      - name: Ensure sampler stub exists
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .agent/sampler
+          date -u +"sampler manifest %Y-%m-%dT%H:%M:%SZ" > .agent/sampler/_stub.txt
+          echo "Wrote .agent/sampler/_stub.txt"
 
       - name: Push using PAT
         env:
