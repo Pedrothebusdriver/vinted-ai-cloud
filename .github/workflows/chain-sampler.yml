@@ -1,0 +1,17 @@
+name: Sampler Auto Chain
+on:
+  workflow_run:
+    workflows: ["Sampler (Openverse) — Commit Manifest"]
+    types: [completed]
+
+jobs:
+  dispatch-next:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: [self-hosted, pi]
+    steps:
+      - name: Trigger Download & Report
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GH_AGENT_PAT }}
+          event-type: run-sampler
+          client-payload: '{"reason":"auto-chain"}'
