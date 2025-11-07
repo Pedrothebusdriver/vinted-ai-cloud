@@ -1,0 +1,63 @@
+name: Cloud Train (hook)
+
+on:
+  workflow_dispatch: {}
+  workflow_run:
+    workflows: ["Eval & Report (Discord)"]
+    types: [completed]
+
+jobs:
+  pack:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: [self-hosted, pi]
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+
+      - name: Build training pack
+        run: |
+          set -euo pipefail
+          mkdir -p .agent/trainpacks
+          D=$(date -u +%Y-%m-%d)
+          OUT=".agent/trainpacks/training-pack-${D}.zip"
+          python3 - <<'PY'
+          import os, json, zipfile, glob, datetime, pathlib
+          D = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+          eval_dir = pathlib.Path("data/evals")/D
+          sample_dir = pathlib.Path("data/online-samples")/D
+          out = pathlib.Path(".agent/trainpacks")/f"training-pack-{D}.zip"
+          out.parent.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+              for p in glob.glob(str(eval_dir/"*.jsonl")):
+                  z.write(p, arcname=f"evals/{os.path.basename(p)}")
+              for p in glob.glob(str(sample_dir/"**/*"), recursive=True):
+                  if os.path.isfile(p):
+                      z.write(p, arcname=f"samples/{os.path.relpath(p, sample_dir)}")
+              z.writestr("meta.json", json.dumps({"date": D}, indent=2))
+          print("WROTE", out)
+          PY
+          ls -lh .agent/trainpacks
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: training-pack
+          path: .agent/trainpacks/*.zip
+
+  # Stub for future training (runs only if key present)
+  train:
+    needs: pack
+    runs-on: ubuntu-latest
+    if: ${{ secrets.OPENAI_API_KEY != '' }}
+    steps:
+      - name: Download pack
+        uses: actions/download-artifact@v4
+        with:
+          name: training-pack
+          path: ./pack
+
+      - name: (Stub) Train in cloud
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "Would kick fine-tune job here using ./pack/*.zip"
+          echo "Training stub complete."
