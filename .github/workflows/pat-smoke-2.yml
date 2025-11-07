@@ -1,0 +1,37 @@
+name: PAT Smoke (force write)
+on:
+  workflow_dispatch: {}
+
+jobs:
+  smoke:
+    runs-on: [self-hosted, pi]
+    steps:
+      - name: Checkout (no persisted creds)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "${{ secrets.GH_AGENT_NAME || 'pi-agent' }}"
+          git config user.email "${{ secrets.GH_AGENT_EMAIL || 'pi@local' }}"
+
+      - name: Write stub file (always new content)
+        run: |
+          mkdir -p .agent
+          echo "stub $(date -u '+%Y-%m-%dT%H:%M:%SZ') $RANDOM" >> .agent/_stub.txt
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No changes, skipping commit."
+          else
+            git add -A
+            git commit -m "agent: PAT smoke write"
+          fi
+
+      - name: Push using fine-grained PAT
+        env:
+          GH_PAT: ${{ secrets.GH_AGENT_PAT }}
+        run: |
+          git push https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git HEAD:main
