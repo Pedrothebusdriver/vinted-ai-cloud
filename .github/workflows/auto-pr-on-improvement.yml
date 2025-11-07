@@ -1,0 +1,68 @@
+name: Auto PR on Improvement
+
+on:
+  workflow_dispatch: {}
+  workflow_run:
+    workflows: ["Sampler (Openverse) — Download & Report"]
+    types: [completed]
+
+jobs:
+  analyze-and-pr:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: [self-hosted, pi]
+    steps:
+      - name: Checkout (no built-in creds)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Ensure tools present
+        run: |
+          test -f tools/metrics_compare.py || (echo "Missing tools/metrics_compare.py"; exit 1)
+          chmod +x tools/metrics_compare.py || true
+
+      - name: Compare metrics and write proposals
+        id: cmp
+        env:
+          AGENT_IMPROVE_MIN: "1.0"
+          AGENT_REGRESS_MAX: "1.0"
+        run: |
+          python3 tools/metrics_compare.py | tee .agent/metrics/compare.out
+          echo "---- decision ----"
+          tail -n +1 .agent/metrics/decision.txt || true
+          # Surface an output for later steps
+          if grep -q "IMPROVED: yes" .agent/metrics/decision.txt; then
+            echo "improved=yes" >> $GITHUB_OUTPUT
+          else
+            echo "improved=no" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit metrics and proposals
+        run: |
+          git config user.name  "${{ secrets.GH_AGENT_NAME || 'pi-agent' }}"
+          git config user.email "${{ secrets.GH_AGENT_EMAIL || 'pi@local' }}"
+          git add .agent/metrics rules/proposed || true
+          if git diff --cached --quiet; then
+            echo "Nothing to commit."
+          else
+            git commit -m "agent: metrics + proposed rules ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+          fi
+
+      - name: Create pull request (only on improvement)
+        if: steps.cmp.outputs.improved == 'yes'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GH_AGENT_PAT }}
+          branch: agent/rules-tweak-${{ github.run_id }}
+          title: "agent: rules tweak — accuracy improved"
+          body-path: ".agent/metrics/pr.md"
+          add-paths: |
+            .agent/metrics/**
+            rules/proposed/**
+          commit-message: "agent: metrics + proposed rules"
+          delete-branch: true
+
+      - name: Skip PR (no improvement)
+        if: steps.cmp.outputs.improved != 'yes'
+        run: echo "No improvement detected; PR not created."
