@@ -1,37 +1,46 @@
 name: PAT Smoke (force write)
+
 on:
   workflow_dispatch: {}
 
 jobs:
-  smoke:
+  write:
     runs-on: [self-hosted, pi]
     steps:
-      - name: Checkout (no persisted creds)
+      - name: Checkout (no built-in creds)
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Configure git identity
         run: |
           git config user.name  "${{ secrets.GH_AGENT_NAME || 'pi-agent' }}"
           git config user.email "${{ secrets.GH_AGENT_EMAIL || 'pi@local' }}"
 
-      - name: Write stub file (always new content)
+      - name: Create unique stub and stage it
         run: |
+          set -euo pipefail
           mkdir -p .agent
-          echo "stub $(date -u '+%Y-%m-%dT%H:%M:%SZ') $RANDOM" >> .agent/_stub.txt
+          TS="$(date -u +%Y%m%dT%H%M%SZ)"
+          FILE=".agent/_stub-${TS}.txt"
+          echo "smoke ${TS}" > "${FILE}"
+          echo "Created ${FILE}"
+          git add "${FILE}"
+          git status --porcelain
 
-      - name: Commit if changed
+      - name: Commit (must create a diff)
         run: |
-          if git diff --quiet && git diff --cached --quiet; then
-            echo "No changes, skipping commit."
+          set -euo pipefail
+          if [ -n "$(git status --porcelain)" ]; then
+            git commit -m "pat: smoke write $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           else
-            git add -A
-            git commit -m "agent: PAT smoke write"
+            echo "No changes to commit"; exit 1
           fi
 
-      - name: Push using fine-grained PAT
+      - name: Push using PAT
         env:
           GH_PAT: ${{ secrets.GH_AGENT_PAT }}
         run: |
-          git push https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git HEAD:main
+          set -euo pipefail
+          git push "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git" HEAD:main
