@@ -1,14 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd ~/vinted-ai-cloud/pi-app
-. .venv/bin/activate
-python - <<'PY'
-import json, os, time, pathlib
-root = pathlib.Path.cwd()
-date = time.strftime("%Y-%m-%d")
-out = root/"data/online-samples"/date
-out.mkdir(parents=True, exist_ok=True)
-log = root/"var/sampler.log"
-log.write_text(f"[{time.strftime('%H:%M:%S')}] sampler stub ran -> {out}\n", encoding="utf-8")
-print(json.dumps({"ok": True, "out": str(out)}))
-PY
+ROOT="$(git rev-parse --show-toplevel)"
+OUT="$ROOT/data/online-samples/$(date -u +%Y-%m-%d)"
+mkdir -p "$OUT"
+echo "sampler stub ran at $(date -u +%FT%TZ)" >> "$OUT/_stub.txt"
+jq -n --arg ts "$(date -u +%FT%TZ)" '{ok:true, ts:$ts, fetched:0, kept:0}' > "$OUT/report.json" 2>/dev/null || \
+  printf '{"ok":true,"ts":"%s","fetched":0,"kept":0}\n' "$(date -u +%FT%TZ)" > "$OUT/report.json"
+echo "OK"
