@@ -24,55 +24,58 @@ jobs:
           echo "Using $mf"
           echo "manifest=$mf" >> "$GITHUB_OUTPUT"
 
-      - name: Post preview to Discord (embeds from manifest URLs)
+      - name: Post preview to Discord (robust link posts)
         env:
           WEBHOOK: ${{ secrets.DISCORD_AI_TEST_WEBHOOK }}
           MANIFEST: ${{ steps.pick.outputs.manifest }}
         shell: bash
         run: |
+          set -euo pipefail
           python3 - <<'PY'
-          import json, os, time, urllib.request, urllib.error
+          import json, os, time, urllib.request as u, urllib.error
 
           wh = os.environ.get("WEBHOOK")
           mf = os.environ["MANIFEST"]
           if not wh:
             raise SystemExit("Missing secret DISCORD_AI_TEST_WEBHOOK")
+          if not os.path.exists(mf):
+            raise SystemExit(f"Manifest not found: {mf}")
 
           data = json.load(open(mf, "r", encoding="utf-8"))
 
-          items = []
+          # collect a handful of HTTPS image links
+          picks = []
           for b in data.get("buckets", []):
               bucket = b.get("bucket", "unknown")
               for it in b.get("items", []):
-                  url = it.get("thumbnail") or it.get("url") or it.get("landing")
-                  if not url:
+                  url = (it.get("thumbnail") or it.get("url") or it.get("landing") or "").strip()
+                  if not url.startswith("https://"):
                       continue
-                  title = (it.get("title") or bucket)[:240]
-                  items.append({"bucket": bucket, "title": title, "url": url})
+                  title = (it.get("title") or bucket).strip()
+                  picks.append((bucket, title, url))
+          if not picks:
+              raise SystemExit("No HTTPS image links found in manifest")
 
-          if not items:
-              raise SystemExit("Manifest has 0 usable items")
+          picks = picks[:5]  # keep it tidy
 
-          # keep it tidy: post first 6 as two messages (3 embeds each)
-          items = items[:6]
+          def post(content: str):
+              body = {"content": content}
+              req = u.Request(wh, data=json.dumps(body).encode("utf-8"),
+                              headers={"Content-Type": "application/json"})
+              with u.urlopen(req, timeout=20) as r:
+                  print("Discord:", r.status)
 
-          def send(embeds, header=None):
-              body = {"content": header or "", "embeds": embeds}
-              req = urllib.request.Request(
-                  wh,
-                  data=json.dumps(body).encode("utf-8"),
-                  headers={"Content-Type": "application/json"},
-              )
-              with urllib.request.urlopen(req, timeout=15) as r:
-                  print("Discord:", r.status, r.read().decode())
+          # header
+          post(f"**Eval preview:** `{os.path.basename(mf)}`")
 
-          for i in range(0, len(items), 3):
-              chunk = items[i:i+3]
-              embeds = [{
-                  "title": it["title"],
-                  "description": f"bucket: {it['bucket']}",
-                  "image": {"url": it["url"]},
-              } for it in chunk]
-              send(embeds, header=f"Eval preview from `{os.path.basename(mf)}`")
-              time.sleep(1)
+          # 1 message per image so Discord unfurls each URL reliably
+          for bucket, title, url in picks:
+              msg = f"bucket: `{bucket}` — {title}\n{url}"
+              try:
+                  post(msg)
+                  time.sleep(0.8)
+              except urllib.error.HTTPError as e:
+                  # fallback: shorten title if Discord complains
+                  post(f"bucket: `{bucket}`\n{url}")
+                  time.sleep(0.8)
           PY
