@@ -17,12 +17,71 @@ jobs:
           git config user.name  "${{ secrets.GH_AGENT_NAME || 'pi-agent' }}"
           git config user.email "${{ secrets.GH_AGENT_EMAIL || 'pi@local' }}"
 
-      # Quick sanity: write a tiny manifest so we see a commit right away
-      - name: Write tiny manifest
+      - name: Build Openverse manifest
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p .agent/sampler
-          echo '{"ok":true,"ts":"'$(date -u +%FT%TZ)'"}' > .agent/sampler/manifest-test.json
-          ls -l .agent/sampler
+          python3 - <<'PY'
+          import json, urllib.request as u, urllib.parse as up, time, os, sys
+
+          # Buckets -> search query (edit anytime)
+          BUCKETS = {
+              "electronics/phones": "smartphone phone",
+              "electronics/laptops": "laptop",
+              "shoes": "shoes",
+              "jackets": "jacket",
+              "dresses": "dress",
+              "bags": "handbag",
+              "toys": "toy",
+              "video-games": "video game",
+              "homeware": "homeware"
+          }
+
+          def search(q, n=12):
+              url = "https://api.openverse.engineering/v1/images/?" + up.urlencode({
+                  "q": q, "license": "cc0", "page_size": n, "format": "json"
+              })
+              with u.urlopen(url, timeout=20) as r:
+                  data = json.load(r)
+              items = []
+              for i in data.get("results", []):
+                  url = i.get("url") or i.get("thumbnail") or i.get("foreign_landing_url")
+                  if not url: 
+                      continue
+                  items.append({
+                      "id": i.get("identifier"),
+                      "title": i.get("title"),
+                      "url": url,
+                      "provider": i.get("provider"),
+                      "landing": i.get("foreign_landing_url"),
+                  })
+              return items
+
+          ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+          manifest = {"ts": ts, "source": "openverse", "buckets": []}
+
+          for bucket, query in BUCKETS.items():
+              try:
+                  items = search(query, 12)
+              except Exception as e:
+                  items = []
+              if items:
+                  manifest["buckets"].append({
+                      "bucket": bucket, "query": query, "items": items
+                  })
+
+          out = f".agent/sampler/manifest-{ts}.json"
+          with open(out, "w", encoding="utf-8") as f:
+              json.dump(manifest, f, ensure_ascii=False, indent=2)
+          print("WROTE", out)
+          PY
+
+      - name: Show manifest summary
+        run: |
+          ls -lh .agent/sampler
+          head -n 50 .agent/sampler/manifest-*.json || true
+
 
       - name: Commit
         run: |
