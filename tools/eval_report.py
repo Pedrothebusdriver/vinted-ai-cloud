@@ -59,12 +59,22 @@ def infer_one(img_path: pathlib.Path):
     }
 
 def post_to_discord(img_path: pathlib.Path, msg: str):
-    if not WEBHOOK: 
+    if not WEBHOOK:
         return
+    try:
+        size = img_path.stat().st_size
+    except Exception:
+        size = 0
+    # Discord hard limit ~8 MB; if bigger, send text-only
+    if size > 8 * 1024 * 1024:
+        requests.post(WEBHOOK, json={"content": f"{msg}\n(attachment >8MB, skipped: {img_path.name})"}, timeout=45)
+        return
+
     with open(img_path, "rb") as f:
         files = {"file": (img_path.name, f, mimetypes.guess_type(img_path.name)[0] or "application/octet-stream")}
         data = {"content": msg}
         requests.post(WEBHOOK, data=data, files=files, timeout=45)
+
 
 def main():
     # Today’s folder(s)
