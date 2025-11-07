@@ -1,89 +1,75 @@
 name: Eval & Report (Discord)
-
-on:
-  workflow_dispatch: {}
+on: { workflow_dispatch: {} }
 
 jobs:
-  report:
+  eval:
     runs-on: [self-hosted, pi]
-    env:
-      WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_AI_TEST }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false, fetch-depth: 0 }
 
-      - name: Guard: webhook present
-        shell: bash
-        run: |
-          if [ -z "${WEBHOOK}" ]; then
-            echo "DISCORD_WEBHOOK_AI_TEST not set; skipping Discord post (success exit)."
-            exit 0
-          fi
-
-      - name: Find newest manifest
+      - name: Find latest sampler manifest
         id: mf
         shell: bash
         run: |
           set -euo pipefail
-          latest="$(ls -1 .agent/sampler/manifest-*.json 2>/dev/null | tail -n1 || true)"
-          if [ -z "${latest}" ]; then
-            echo "No manifest found; posting a small notice to Discord."
-            echo 'nomf=true' >> "$GITHUB_OUTPUT"
-          else
-            echo "mf=${latest}" >> "$GITHUB_OUTPUT"
+          f=$(ls -1 .agent/sampler/manifest-*.json 2>/dev/null | tail -n1 || true)
+          if [ -z "${f:-}" ]; then
+            echo "No manifest found"; exit 1
           fi
+          echo "manifest=$f" >> "$GITHUB_OUTPUT"
+          echo "Using manifest: $f"
 
-      - name: Post report to Discord (from manifest, embeds only)
-        if: steps.mf.outputs.nomf != 'true'
-        shell: bash
+      - name: Download a few images from manifest
+        id: grab
+        env: { MF: ${{ steps.mf.outputs.manifest }} }
         run: |
+          set -euo pipefail
           python3 - <<'PY'
-          import os, json, glob, urllib.request as U
-          wb=os.environ['WEBHOOK']
-          mf = os.environ.get('MF')
-          if not mf:
-              files=sorted(glob.glob('.agent/sampler/manifest-*.json'))
-              mf = files[-1] if files else None
-          if not mf:
-              raise SystemExit("no manifest")
+          import json, os, urllib.request as u, pathlib, random, sys
+          mf = os.environ["MF"]
+          data = json.load(open(mf))
+          items = []
+          for b in data.get("buckets", []):
+              items += b.get("items", [])[:2]           # up to 2 per bucket
+          random.shuffle(items)
+          items = items[:6]                             # at most 6 total
 
-          m=json.load(open(mf,'r',encoding='utf-8'))
-
-          # Build up to 6 embeds (2 per bucket × 3 buckets) with remote image URLs
-          embeds=[]
-          picked=0
-          for b in m.get('buckets', [])[:3]:
-              for it in b.get('items', [])[:2]:
-                  url = it.get('url') or it.get('landing')
-                  if not url: 
-                      continue
-                  embeds.append({
-                      "title": b.get("bucket","(bucket)"),
-                      "url": it.get("landing") or it.get("url"),
-                      "image": {"url": url}
-                  })
-                  picked+=1
-                  if picked>=6: break
-              if picked>=6: break
-
-          content = f"**Sampler report** • {m.get('ts','')} • buckets={len(m.get('buckets',[]))} • images={picked}"
-          payload={"content": content, "embeds": embeds[:10]}
-
-          req=U.Request(wb, data=json.dumps(payload).encode('utf-8'),
-                        headers={'Content-Type':'application/json'})
-          with U.urlopen(req, timeout=20) as r:
-              r.read()
-          print("Posted to Discord:", picked, "embeds")
+          outdir = "/tmp/sampler"
+          os.makedirs(outdir, exist_ok=True)
+          kept = []
+          for i, it in enumerate(items):
+              url = it.get("url")
+              if not url: 
+                  continue
+              fn = os.path.join(outdir, f"img{i}.jpg")
+              try:
+                  u.urlretrieve(url, fn)
+                  if os.path.getsize(fn) <= 8000000:   # Discord 8MB limit
+                      kept.append((fn, it.get("title",""), it.get("landing","")))
+              except Exception:
+                  pass
+          open(os.path.join(outdir,"list.txt"),"w").write(
+              "\n".join("\t".join([p,t,l]) for p,t,l in kept)
+          )
+          print(f"KEPT={len(kept)}")
           PY
-        env:
-          MF: ${{ steps.mf.outputs.mf }}
 
-      - name: Post 'no manifest' notice (Discord)
-        if: steps.mf.outputs.nomf == 'true'
-        shell: bash
+      - name: Post images to Discord
+        env:
+          HOOK: ${{ secrets.DISCORD_WEBHOOK_AI_TEST }}
         run: |
-          curl -fsS -H 'Content-Type: application/json' \
-            -d '{"content":"Sampler report: no manifest found to display."}' \
-            "$WEBHOOK" || true
+          set -euo pipefail
+          if [ -z "$HOOK" ]; then echo "Missing DISCORD_WEBHOOK_AI_TEST"; exit 1; fi
+          LIST=/tmp/sampler/list.txt
+          if [ ! -s "$LIST" ]; then echo "No images to post"; exit 0; fi
+          n=0
+          while IFS=$'\t' read -r path title landing; do
+            [ -f "$path" ] || continue
+            # keep payload simple to avoid JSON escape issues
+            curl -sS -F "payload_json={\"content\":\"📷 Openverse sample\"}" \
+                      -F "file=@${path}" "$HOOK" -o /dev/null
+            n=$((n+1))
+            [ $n -ge 3 ] && break   # post up to 3 previews per run
+          done < "$LIST"
+          echo "Posted $n image(s)"
