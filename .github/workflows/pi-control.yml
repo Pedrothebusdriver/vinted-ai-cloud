@@ -109,6 +109,14 @@ jobs:
         shell: bash
         run: |
           [ -z "${DISCORD_WEBHOOK_URL:-}" ] && exit 0
+                - name: Handle /bootstrap-sampler
+        if: startsWith(github.event.comment.body, '/bootstrap-sampler')
+        run: bash scripts/sampler_bootstrap.sh
+
+      - name: Handle /sampler run
+        if: startsWith(github.event.comment.body, '/sampler run')
+        run: bash scripts/sampler_run.sh
+
           STATUS="${{ job.status }}"
           BODY=$(sed 's/"/\\"/g' "$LOG_PATH" | head -c 1800)
           printf '{"content":"**Pi Control**: %s\n```%s```"}' "$STATUS" "$BODY" \
