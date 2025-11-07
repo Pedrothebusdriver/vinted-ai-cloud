@@ -2,35 +2,88 @@ name: Eval & Report (Discord)
 
 on:
   workflow_dispatch: {}
-  schedule:
-    # Run nightly every 20 mins between 21:00–06:00 UTC (adjust if you prefer local time)
-    - cron: "*/20 21-23 * * *"
-    - cron: "*/20 0-5 * * *"
 
 jobs:
-  eval:
+  report:
     runs-on: [self-hosted, pi]
-    timeout-minutes: 15
     env:
-      DISCORD_AGENT_WEBHOOK: ${{ secrets.DISCORD_AGENT_WEBHOOK }}
-      PI_INFER_URL: ${{ vars.PI_INFER_URL }}
+      WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_AI_TEST }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Run evaluator & send to Discord
+      - name: Guard: webhook present
+        shell: bash
         run: |
-          python3 tools/eval_report.py
-
-      - name: Commit eval results
-        run: |
-          git config user.name  "pi-agent"
-          git config user.email "pi@local"
-          git add data/evals || true
-          if git diff --cached --quiet; then
-            echo "No eval changes."
-          else
-            git commit -m "eval: nightly results"
-            git push "https://x-access-token:${{ secrets.GH_AGENT_PAT }}@github.com/${{ github.repository }}.git" HEAD:main
+          if [ -z "${WEBHOOK}" ]; then
+            echo "DISCORD_WEBHOOK_AI_TEST not set; skipping Discord post (success exit)."
+            exit 0
           fi
+
+      - name: Find newest manifest
+        id: mf
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest="$(ls -1 .agent/sampler/manifest-*.json 2>/dev/null | tail -n1 || true)"
+          if [ -z "${latest}" ]; then
+            echo "No manifest found; posting a small notice to Discord."
+            echo 'nomf=true' >> "$GITHUB_OUTPUT"
+          else
+            echo "mf=${latest}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post report to Discord (from manifest, embeds only)
+        if: steps.mf.outputs.nomf != 'true'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, json, glob, urllib.request as U
+          wb=os.environ['WEBHOOK']
+          mf = os.environ.get('MF')
+          if not mf:
+              files=sorted(glob.glob('.agent/sampler/manifest-*.json'))
+              mf = files[-1] if files else None
+          if not mf:
+              raise SystemExit("no manifest")
+
+          m=json.load(open(mf,'r',encoding='utf-8'))
+
+          # Build up to 6 embeds (2 per bucket × 3 buckets) with remote image URLs
+          embeds=[]
+          picked=0
+          for b in m.get('buckets', [])[:3]:
+              for it in b.get('items', [])[:2]:
+                  url = it.get('url') or it.get('landing')
+                  if not url: 
+                      continue
+                  embeds.append({
+                      "title": b.get("bucket","(bucket)"),
+                      "url": it.get("landing") or it.get("url"),
+                      "image": {"url": url}
+                  })
+                  picked+=1
+                  if picked>=6: break
+              if picked>=6: break
+
+          content = f"**Sampler report** • {m.get('ts','')} • buckets={len(m.get('buckets',[]))} • images={picked}"
+          payload={"content": content, "embeds": embeds[:10]}
+
+          req=U.Request(wb, data=json.dumps(payload).encode('utf-8'),
+                        headers={'Content-Type':'application/json'})
+          with U.urlopen(req, timeout=20) as r:
+              r.read()
+          print("Posted to Discord:", picked, "embeds")
+          PY
+        env:
+          MF: ${{ steps.mf.outputs.mf }}
+
+      - name: Post 'no manifest' notice (Discord)
+        if: steps.mf.outputs.nomf == 'true'
+        shell: bash
+        run: |
+          curl -fsS -H 'Content-Type: application/json' \
+            -d '{"content":"Sampler report: no manifest found to display."}' \
+            "$WEBHOOK" || true
