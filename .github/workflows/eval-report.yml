@@ -1,0 +1,36 @@
+name: Eval & Report (Discord)
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Run nightly every 20 mins between 21:00–06:00 UTC (adjust if you prefer local time)
+    - cron: "*/20 21-23 * * *"
+    - cron: "*/20 0-5 * * *"
+
+jobs:
+  eval:
+    runs-on: [self-hosted, pi]
+    timeout-minutes: 15
+    env:
+      DISCORD_AGENT_WEBHOOK: ${{ secrets.DISCORD_AGENT_WEBHOOK }}
+      PI_INFER_URL: ${{ vars.PI_INFER_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run evaluator & send to Discord
+        run: |
+          python3 tools/eval_report.py
+
+      - name: Commit eval results
+        run: |
+          git config user.name  "pi-agent"
+          git config user.email "pi@local"
+          git add data/evals || true
+          if git diff --cached --quiet; then
+            echo "No eval changes."
+          else
+            git commit -m "eval: nightly results"
+            git push "https://x-access-token:${{ secrets.GH_AGENT_PAT }}@github.com/${{ github.repository }}.git" HEAD:main
+          fi
