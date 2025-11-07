@@ -3,121 +3,54 @@ name: Pi Control (issue commands)
 on:
   issue_comment:
     types: [created]
-
-permissions:
-  contents: read
-  issues: write
+  workflow_dispatch:
 
 jobs:
   control:
     if: |
-      github.event.issue.number == 1 &&
-      (startsWith(github.event.comment.body, '/deploy') ||
-       startsWith(github.event.comment.body, '/uitest') ||
-       startsWith(github.event.comment.body, '/status'))
-    runs-on: [self-hosted, pi]
-    env:
-      XDG_RUNTIME_DIR: /run/user/1000
-      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      CMD: ${{ github.event.comment.body }}
-    concurrency:
-      group: pi-control
-      cancel-in-progress: true
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       contains(github.event.comment.body, '/'))
+    runs-on: [self-hosted, pi]   # your pi-vinted runner
 
     steps:
-      - name: Ack
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const cmd = process.env.CMD.trim();
-            github.rest.issues.createComment({
-              ...context.repo,
-              issue_number: context.issue.number,
-              body: `⏱️ Received **${cmd}** — running on the Pi…`
-            });
+      - uses: actions/checkout@v4
 
-      - name: Execute
-        id: run
-        shell: bash
+      - name: Parse command
+        id: parse
         run: |
           set -euo pipefail
-          LOG=/tmp/pi_control.$$.log
-          touch "$LOG"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "cmd=" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          body="${{ github.event.comment.body }}"
+          # take the first slash-command on the first line
+          cmd="$(printf %s "$body" | sed -n '1s/^[[:space:]]*\/\([^[:space:]].*\)$/\1/p')"
+          echo "cmd=$cmd" >>"$GITHUB_OUTPUT"
 
-          case "$CMD" in
-            /status*)
-              {
-                echo "== systemctl status vinted-app =="
-                systemctl --user status vinted-app.service || true
-                echo
-                echo "== /health =="
-                curl -sS 127.0.0.1:8080/health || true
-                echo
-                echo "== admin routes in openapi =="
-                curl -sS 127.0.0.1:8080/openapi.json | tr ',' '\n' | grep -o '"/admin[^"]*"' | tr -d '"' | sort -u || true
-              } | sed $'s/\r//g' > "$LOG"
+      - name: Run command on Pi
+        if: ${{ steps.parse.outputs.cmd != '' }}
+        run: |
+          set -euo pipefail
+          echo ">> CMD: '${{ steps.parse.outputs.cmd }}'"
+          case "${{ steps.parse.outputs.cmd }}" in
+            bootstrap-sampler)
+              bash scripts/sampler_bootstrap.sh
               ;;
-
-            /deploy*)
-              {
-                cd ~/vinted-ai-cloud
-                git fetch --prune origin
-                git reset --hard origin/main
-                cd ~/vinted-ai-cloud/pi-app
-                python3 -m venv .venv 2>/dev/null || true
-                . .venv/bin/activate
-                pip install -U pip
-                pip install -r requirements.txt
-                systemctl --user daemon-reload
-                systemctl --user restart vinted-app.service
-                sleep 2
-                echo "== /health =="
-                curl -sS 127.0.0.1:8080/health || true
-              } | sed $'s/\r//g' > "$LOG"
+            sampler\ run)
+              bash scripts/sampler_run.sh
               ;;
-
-            /uitest*)
-              {
-                echo "== /api/uitest/run =="
-                curl -sS 127.0.0.1:8080/api/uitest/run
-              } | sed $'s/\r//g' > "$LOG"
-              ;;
-
             *)
-              echo "Unknown command: $CMD" > "$LOG"
+              echo "Unknown command: '${{ steps.parse.outputs.cmd }}'"
+              exit 2
               ;;
           esac
 
-          echo "LOG_PATH=$LOG" >> $GITHUB_OUTPUT
-
-      - name: Comment back
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const log = fs.readFileSync(process.env.LOG_PATH, 'utf8');
-            const head = log.length > 6000 ? (log.slice(0,6000) + "\n…(truncated)") : log;
-            github.rest.issues.createComment({
-              ...context.repo,
-              issue_number: context.issue.number,
-              body: "Result:\n\n```\n" + head + "\n```"
-            });
-
-      - name: Discord (best-effort)
-        if: always()
-        shell: bash
+      - name: Post back to issue
+        if: ${{ github.event_name == 'issue_comment' && steps.parse.outputs.cmd != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          [ -z "${DISCORD_WEBHOOK_URL:-}" ] && exit 0
-                - name: Handle /bootstrap-sampler
-        if: startsWith(github.event.comment.body, '/bootstrap-sampler')
-        run: bash scripts/sampler_bootstrap.sh
-
-      - name: Handle /sampler run
-        if: startsWith(github.event.comment.body, '/sampler run')
-        run: bash scripts/sampler_run.sh
-
-          STATUS="${{ job.status }}"
-          BODY=$(sed 's/"/\\"/g' "$LOG_PATH" | head -c 1800)
-          printf '{"content":"**Pi Control**: %s\n```%s```"}' "$STATUS" "$BODY" \
-            | curl -sS -H 'Content-Type: application/json' -d @- "$DISCORD_WEBHOOK_URL" >/dev/null || true
+          gh issue comment ${{ github.event.issue.number }} --body \
+            "✅ Ran \`/${{ steps.parse.outputs.cmd }}\` on the Pi."
