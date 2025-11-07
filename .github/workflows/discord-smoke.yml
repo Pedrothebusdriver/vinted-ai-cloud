@@ -1,0 +1,19 @@
+name: Discord Smoke
+on: { workflow_dispatch: {} }
+
+jobs:
+  ping:
+    runs-on: [self-hosted, pi]
+    steps:
+      - name: Check secret + ping Discord
+        env:
+          HOOK: ${{ secrets.DISCORD_WEBHOOK_AI_TEST }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "❌ Missing repo secret DISCORD_WEBHOOK_AI_TEST"; exit 1
+          fi
+          code=$(curl -sS -o /dev/null -w "%{http_code}" \
+                 -H 'Content-Type: application/json' \
+                 -d '{"content":"✅ GitHub→Pi→Discord smoke OK"}' "$HOOK")
+          echo "HTTP=$code"
+          test "$code" = 204
