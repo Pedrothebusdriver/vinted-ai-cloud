@@ -1,10 +1,20 @@
 name: Agent Commit Test
+
 on:
   workflow_dispatch: {}
+
+# Not strictly required because we push with a PAT, but harmless to keep.
+permissions:
+  contents: write
 
 jobs:
   commit:
     runs-on: [self-hosted, pi]
+    env:
+      GH_PAT: ${{ secrets.GH_AGENT_PAT }}
+      GIT_USER_NAME:  ${{ secrets.GH_AGENT_NAME || 'pi-agent' }}
+      GIT_USER_EMAIL: ${{ secrets.GH_AGENT_EMAIL || 'pi@local' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -13,25 +23,27 @@ jobs:
 
       - name: Configure git
         run: |
-          git config user.name  "${{ secrets.GH_AGENT_NAME || 'pi-agent' }}"
-          git config user.email "${{ secrets.GH_AGENT_EMAIL || 'pi@local' }}"
+          git config user.name  "${GIT_USER_NAME}"
+          git config user.email "${GIT_USER_EMAIL}"
 
       - name: Write heartbeat
         run: |
-          mkdir -p data
-          echo "heartbeat $(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> data/agent-heartbeat.txt
+          set -euo pipefail
+          mkdir -p .agent
+          echo "heartbeat $(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> .agent/agent-heartbeat.txt
 
-      - name: Commit
+      - name: Commit (if changed)
         run: |
-          if git diff --quiet && git diff --cached --quiet; then
-            echo "No changes, skipping commit."
-          else
+          set -euo pipefail
+          if git status --porcelain | grep -q .; then
             git add -A
             git commit -m "agent: heartbeat"
+          else
+            echo "No changes to commit."
           fi
 
       - name: Push using PAT
-        env:
-          GH_PAT: ${{ secrets.GH_AGENT_PAT }}
+        if: env.GH_PAT != ''
         run: |
-          git push https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git HEAD:main
+          set -euo pipefail
+          git push "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git" HEAD:main
