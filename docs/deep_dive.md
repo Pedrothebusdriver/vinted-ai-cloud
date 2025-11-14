@@ -67,6 +67,9 @@
 | Ryzen 7 7840HS mini PC | High CPU+GPU, can run ONNX/TensorRT | Higher cost (~£600) | Future-proof for FashionCLIP + NSFW models. |
 | Jetson Orin Nano | Native GPU inference | Limited general-purpose performance | Best if we invest heavily in CV inference locally. |
 
+See `docs/hardware_security.md` for the detailed hardware shortlist, benchmark
+plan, provisioning flow, and firewall/secrets checklist.
+
 Migration steps:
 1. Snapshot `pi-app/data` to external SSD.
 2. Provision mini PC with Ubuntu/Proxmox; install Docker + Compose.
@@ -95,8 +98,9 @@ We’ll tackle these in order; as each milestone lands, bubble it up to `docs/ST
 ## 5. Immediate Action Items
 
 1. **Sampler auth** – build + test logged-in Vinted fetcher, switch nightly timer.
-2. **Observability** – add Prometheus metrics + Loki/Promtail scaffolding + dashboard docs.
-3. **Bridge automation** – enable Discord bridge service + relay streamers once bot token is available.
-4. **Hardware PoC** – benchmark Pi vs N100 mini PC; capture CPU/RAM metrics during sampler runs.
+2. **Manual upload funnel (new agent)** – expose `/api/upload` safely (API key/rate limit), publish a web/iOS Shortcut guide so testers can push existing photos without the prototype.
+3. **Observability** – add Prometheus metrics + Loki/Promtail scaffolding + dashboard docs.
+4. **Bridge automation** – enable Discord bridge service + relay streamers once bot token is available.
+5. **Hardware PoC / security hardening (new agent)** – benchmark mini PC options, script provisioning (Ansible/Docker), lock down firewall/secrets, and document the migration path.
 
 Track progress by updating `docs/STATUS.md` and referencing this deep-dive checklist after each milestone.***

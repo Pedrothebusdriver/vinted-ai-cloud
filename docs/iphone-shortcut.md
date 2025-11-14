@@ -6,6 +6,7 @@ Pi’s `/api/upload` endpoint so the draft appears in Discord within a minute.
 ## Prerequisites
 - Public base URL: `http://100.85.116.21:8080`
 - Endpoint: `POST /api/upload` (multipart form)
+- Upload API key (ask in Discord; required whenever the endpoint is exposed publicly)
 - Fields:
   - `files` — one entry per image (binary data)
   - optional `metadata` — JSON string with hints (brand, size, etc.)
@@ -35,7 +36,9 @@ to Vinted Pi”).
         - Field 1: `files` → tap **File**, choose **Repeat Item** (if you didn’t
           Base64-encode) or choose **Encoded Media** → set MIME type `image/jpeg`.
         - Field 2 (optional): `metadata` → Text from step 5.
-      - Headers (optional but nice): `Accept: application/json`
+      - Headers:
+        - `Accept: application/json`
+        - `X-Upload-Key: YOUR_KEY_HERE`
    7. **Get Dictionary from Input** → parses the JSON response.
    8. **Show Notification** → Text: `Uploaded draft #${Dictionary[
         "item_id"]}!`
@@ -47,6 +50,8 @@ to Vinted Pi”).
   "hoodie"), or prompt for text each run.
 - The API responds with `{"queued": true, "item_id": N}`; drafts appear at
   `http://100.85.116.21:8080/draft/N` and in the Discord draft channel.
+- If you don’t include the `X-Upload-Key` header (or use the wrong key), the
+  Shortcut will show a 401 error and the uploads will be rejected.
 
 ## Testing
 1. Run the shortcut with a couple of product photos.

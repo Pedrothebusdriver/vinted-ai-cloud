@@ -8,6 +8,7 @@ Discord. No coding required.
 - iPhone with the **Shortcuts** app (installed by default).
 - Internet access to reach `http://100.85.116.21:8080`.
 - The Discord server where drafts get posted (e.g., “AI Test”).
+- Upload API key string (ask the team; needed any time `/api/upload` is public).
 
 ## One-time setup
 1. Open the **Shortcuts** app on your iPhone.
@@ -28,6 +29,9 @@ Discord. No coding required.
       - OPTIONAL: add another field named `metadata`.
         - Type: **Text**
         - Value: e.g., `{"source":"iphone-shortcut","note":"Bedroom hoodie"}`
+      - Tap **Headers** → **Add New Field**.
+        - Key: `X-Upload-Key`
+        - Value: (paste your upload API key; Shortcuts stores it on-device).
    4. After the POST action, add **Get Dictionary from Input** (this parses the
       server response).
    5. Add **Show Notification** with the text:
@@ -51,5 +55,7 @@ Discord. No coding required.
 - You can duplicate the shortcut and change the `metadata` text for different
 templates (e.g., `"note":"Kids jackets"`).
 - Draft links always open in Safari and work fine on mobile.
+- If Shortcuts says “401 unauthorized,” double-check the `X-Upload-Key` header
+  or request a new key.
 
 Need help? Ping `@codex` in Discord and mention the draft number.
