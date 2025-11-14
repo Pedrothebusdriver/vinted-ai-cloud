@@ -28,7 +28,8 @@ Each item includes very simple “do this” steps.
 
 1. Decide the API key string you want (e.g., `UPLOAD_KEY=abc123`).
 2. DM it to us or create a file `~/secrets/upload_key.txt` with just that value.
-3. We will configure the Pi service to require `X-Upload-Key: <value>` and update the Shortcut/Web forms accordingly.
+3. Confirm whether the PI will continue to run on your home IP or move to the mini PC so we point the app + web form at the right host.
+4. We will configure the Pi service to require `X-Upload-Key: <value>` and update the Shortcut/Web forms accordingly.
 
 (If you already created a key, just confirm it’s `X-Upload-Key` so we can align docs + code.)
 
@@ -48,6 +49,61 @@ Each item includes very simple “do this” steps.
 1. Follow `docs/manuals/phone-upload.md` (Shortcuts) or `docs/manuals/web-upload.md` (once live).
 2. Run a quick test (a couple of photos).
 3. If anything breaks or is confusing, jot the draft number + symptom and ping us in Discord or edit this doc with notes.
+
+---
+
+## 5. Provide SSH Keys for New Agents
+**Goal:** give additional agents the same Pi access as the primary CLI.**
+
+1. Follow the guide in `docs/manuals/pi-access.md`.
+2. Ask each new agent for their public key (`.pub` file only).
+3. Either add it yourself (per the guide) or drop the `.pub` file on the Pi (e.g., `~/secrets/new-agent.pub`) and tell me to append it.
+4. Let the agent test `ssh pi@100.85.116.21` so they can run scripts without waiting for me.
+
+---
+
+## 6. Hardware Platform Preference
+**Goal:** pick the next machine (Intel N100 vs. Ryzen mini PC vs. other) so we can start provisioning.
+
+1. Skim `docs/hardware_security.md` for the short-list + provisioning plan.
+2. Let us know which direction you prefer (cheap N100 now vs. higher-end Ryzen/Jetson) and your budget/availability constraints.
+3. If you already have a candidate model in mind, drop the link/specs here so we can tailor the Ansible/provisioning scripts to that hardware profile.
+
+Once we have your choice, we’ll script the install + benchmarking flow and prep the migration steps.
+
+---
+
+## 7. Discord Bridge Go-Live
+**Goal:** get the shared Discord ↔︎ Codex bridge online so all agents (CLI + Discord) can coordinate in one channel.
+
+1. Finalize the bot token + channel IDs (see item #1) and confirm which Discord channel(s) we should mirror.
+   - Status: token stored under `~/secrets/discord_bot.json`; channel `#vinted-ai-group-chat` (ID `1438888366832746517`) is ready.
+2. Confirm whether the bridge should post as a standalone bot user or via webhooks (affects how we brand the messages). _Default: bot user._
+3. Give a thumbs-up when you’re ready for us to deploy `tools/discord_bridge_bot.py` on the Pi/mini PC; we’ll set up the systemd unit and test both inbound/outbound paths. _Ready once you confirm the bot should post under its own name._
+
+Once you’re good with those, we’ll light it up so you, the other agents, and the CLI can chat in real time.
+
+---
+
+## 7. Discord Role/Channel Access
+**Goal:** (Future) allow the bridge bot (or agent accounts) to create/delete/manage channels when we need to tidy Discord.
+
+1. When ready, create a server role (e.g., `AI Admin`) with the permissions you’re comfortable delegating (Manage Channels, View Channels, etc.).
+2. Assign that role to the bot user (or specific agent accounts).
+3. Update this doc with any guardrails (“don’t touch private staff channels,” etc.) so we know the scope when you flip the switch.
+
+This can wait until you want us to handle more Discord upkeep; just keeping it on the radar.
+
+---
+
+## 8. Dedicated Agent Bots (Future)
+**Goal:** give each agent its own Discord bot/user so messages show up under unique names (no prefixes needed).
+
+1. When/if we want this, we’ll need one Discord application per agent (each with its own token).
+2. We can either run multiple instances of the bridge bot (one per agent) or extend the existing bot to support per-agent personas.
+3. Note down any naming scheme you prefer so we can reserve bot usernames ahead of time.
+
+For now the shared bot + `[Agent#X]` prefixes work; this item is just to revisit when we want individual presences.
 
 ---
 

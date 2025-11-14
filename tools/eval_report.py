@@ -1,9 +1,19 @@
-import os, sys, json, glob, time, pathlib, requests, mimetypes
+import json
+import mimetypes
+import os
+import pathlib
 from datetime import datetime
 
+import requests
+
 # Config via env (edit in repo Variables later if you like)
-WEBHOOK = os.environ.get("DISCORD_AGENT_WEBHOOK", "").strip()
+WEBHOOK_EVAL = os.environ.get("DISCORD_WEBHOOK_AI_TEST", os.environ.get("DISCORD_AGENT_WEBHOOK", "")).strip()
+SUMMARY_WEBHOOK = os.environ.get("DISCORD_WEBHOOK_GENERAL", os.environ.get("DISCORD_WEBHOOK_URL", "")).strip()
 INFER_URL = os.environ.get("PI_INFER_URL", "http://127.0.0.1:8080/api/infer").strip()
+MAX_IMAGES = int(os.environ.get("EVAL_MAX_IMAGES", "12"))
+POST_PER_IMAGE = os.environ.get("EVAL_POST_PER_IMAGE", "1").strip().lower() not in {"0", "false", "no"}
+POST_ONLY_FAILS = os.environ.get("EVAL_POST_FAILS_ONLY", "0").strip().lower() in {"1", "true", "yes"}
+MAX_POSTS = int(os.environ.get("EVAL_MAX_DISCORD_POSTS", str(MAX_IMAGES)))
 ROOT = pathlib.Path("data/online-samples")
 EVAL_OUT = pathlib.Path("data/evals")
 
@@ -58,8 +68,8 @@ def infer_one(img_path: pathlib.Path):
         "raw": j,
     }
 
-def post_to_discord(img_path: pathlib.Path, msg: str):
-    if not WEBHOOK:
+def post_to_discord(img_path: pathlib.Path, msg: str, hook: str):
+    if not hook:
         return
     try:
         size = img_path.stat().st_size
@@ -67,13 +77,13 @@ def post_to_discord(img_path: pathlib.Path, msg: str):
         size = 0
     # Discord hard limit ~8 MB; if bigger, send text-only
     if size > 8 * 1024 * 1024:
-        requests.post(WEBHOOK, json={"content": f"{msg}\n(attachment >8MB, skipped: {img_path.name})"}, timeout=45)
+        requests.post(hook, json={"content": f"{msg}\n(attachment >8MB, skipped: {img_path.name})"}, timeout=45)
         return
 
     with open(img_path, "rb") as f:
         files = {"file": (img_path.name, f, mimetypes.guess_type(img_path.name)[0] or "application/octet-stream")}
         data = {"content": msg}
-        requests.post(WEBHOOK, data=data, files=files, timeout=45)
+        requests.post(hook, data=data, files=files, timeout=45)
 
 
 def main():
@@ -89,7 +99,7 @@ def main():
     for r in roots:
         imgs += [p for p in r.glob("**/*") if p.suffix.lower() in {".jpg",".jpeg",".png",".webp"}]
     # Cap to avoid spamming Discord
-    imgs = imgs[:12]
+    imgs = imgs[:MAX_IMAGES]
 
     if not imgs:
         print("No images to evaluate.")
@@ -101,6 +111,7 @@ def main():
 
     ok, total = 0, 0
     lines = []
+    posted = 0
     for img in imgs:
         # Bucket is the folder after the date segment
         parts = img.relative_to(ROOT).parts  # YYYY-MM-DD / bucket / file
@@ -130,12 +141,16 @@ def main():
                 f"{'✅' if is_correct else '❌'}\n"
                 f"tags: {tag_str} | price: {price_str}"
             )
-            post_to_discord(img, msg)
+            if POST_PER_IMAGE and (not POST_ONLY_FAILS or not is_correct) and posted < MAX_POSTS:
+                post_to_discord(img, msg, WEBHOOK_EVAL)
+                posted += 1
 
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
             lines.append({"file": str(img), "bucket": expected_bucket, "error": err, "ts": datetime.utcnow().isoformat()+"Z"})
-            post_to_discord(img, f"**Eval error** on `{expected_bucket}` → `{img.name}`\n`{err}`")
+            if POST_PER_IMAGE and posted < MAX_POSTS:
+                post_to_discord(img, f"**Eval error** on `{expected_bucket}` → `{img.name}`\n`{err}`", WEBHOOK_EVAL)
+                posted += 1
 
     # Save eval lines
     with open(results_path, "a", encoding="utf-8") as f:
@@ -146,8 +161,8 @@ def main():
     if total:
         acc = 100.0*ok/total
         summary = f"**Eval summary** {ok}/{total} correct ({acc:.1f}%) on `{today}`"
-        if WEBHOOK:
-            requests.post(WEBHOOK, json={"content": summary}, timeout=20)
+        if SUMMARY_WEBHOOK:
+            requests.post(SUMMARY_WEBHOOK, json={"content": summary}, timeout=20)
     print("Done.")
 
 if __name__ == "__main__":

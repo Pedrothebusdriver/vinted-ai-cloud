@@ -46,6 +46,9 @@
   - Use mobile GraphQL endpoints (or Playwright) to avoid Cloudflare.
   - Store normalized metadata JSON alongside images.
   - Integrate with `scripts/run_sampler_cycle.sh` via `SAMPLER_SOURCE=vinted`.
+- _Update (Nov 13): Logged-in sampler + cycle integration landed (see
+  `docs/vinted-auth-notes.md` + `docs/examples/vinted.json.example`). Next up:
+  CF soak tests, Playwright fallback, and long-run monitoring._
 - Harden `app.py`:
   - Session reuse, randomized UAs, and fallback to headless browser.
   - Disk cache with TTL + compression; store sample responses for offline training.
@@ -97,7 +100,7 @@ We’ll tackle these in order; as each milestone lands, bubble it up to `docs/ST
 
 ## 5. Immediate Action Items
 
-1. **Sampler auth** – build + test logged-in Vinted fetcher, switch nightly timer.
+1. **Sampler auth soak tests** – run the logged-in Vinted fetcher nightly, add Playwright fallback / CF resilience, and keep the timer pointed at real data.
 2. **Manual upload funnel (new agent)** – expose `/api/upload` safely (API key/rate limit), publish a web/iOS Shortcut guide so testers can push existing photos without the prototype.
 3. **Observability** – add Prometheus metrics + Loki/Promtail scaffolding + dashboard docs.
 4. **Bridge automation** – enable Discord bridge service + relay streamers once bot token is available.

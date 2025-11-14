@@ -1,7 +1,10 @@
-from fastapi.responses import StreamingResponse, JSONResponse
-from pathlib import Path
+import json
+import zipfile
 from io import BytesIO
-import zipfile, json
+from pathlib import Path
+
+from fastapi.responses import JSONResponse, StreamingResponse
+
 from app.db import connect
 
 BASE = Path('.')
@@ -33,10 +36,14 @@ def _draft_meta(item_id: int):
     meta["title"] = (draft['title'] or '').strip() if draft else ''
 
     bits = []
-    if attrs.get('brand'): bits.append(f"Brand: {attrs['brand']}")
-    if attrs.get('size'): bits.append(f"Size: {attrs['size']}")
-    if attrs.get('item_type'): bits.append(f"Type: {attrs['item_type']}")
-    if attrs.get('colour'): bits.append(f"Colour: {attrs['colour']}")
+    if attrs.get('brand'):
+        bits.append(f"Brand: {attrs['brand']}")
+    if attrs.get('size'):
+        bits.append(f"Size: {attrs['size']}")
+    if attrs.get('item_type'):
+        bits.append(f"Type: {attrs['item_type']}")
+    if attrs.get('colour'):
+        bits.append(f"Colour: {attrs['colour']}")
     meta["description"] = "\n".join(bits)
 
     meta["brand"] = attrs.get('brand', '')

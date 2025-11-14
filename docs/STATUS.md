@@ -40,6 +40,7 @@ _Last updated: 2025-11-12 (late night)_
 - **Agent relay bus** – `tools/agent_relay.py` gives Codex agents a shared inbox under `.agent/relay/`, plus `tools/agent_relay_stream.py` for always-on listeners, so the CLI + Discord agents can coordinate (send/pull JSONL messages, optional broadcast/webhook mirroring) without user intervention.
 - **Project scope + mobile funnel docs** – Added `docs/PROJECT_SCOPE.md` (product phases) and `docs/iphone-shortcut.md` so every agent shares the same end goal and testers can upload from iPhone via Shortcuts.
 - **Manual upload hardening** – `/api/upload` now expects an API key + per-IP rate limit, the web uploader stores the key client-side, and the Shortcut/phone guides were updated alongside a new `docs/manuals/web-upload.md`.
+- **Authenticated Vinted sampler** – `tools/vinted_sampler.py` loads OAuth creds from `~/secrets/vinted.json`, caches tokens, enforces optional catalog filters, emits normalized `_summary.json`, and `run_sampler_cycle.sh` switches to it automatically when `SAMPLER_SOURCE=vinted`.
 - **Hardware/security playbook** – captured the migration + hardening plan under `docs/hardware_security.md` (hardware shortlist, provisioning script outline, firewall + secret storage checklist).
 - **Architecture deep dive** – `docs/deep_dive.md` captures the current stack, pain points, upgrade plan, and hardware migration options (Pi → mini PC/Jetson) so we can chip away at refactors without losing context.
 - **Tooling + heartbeat automation** – `pyproject.toml` + `requirements-dev.txt` add ruff/mypy/pytest scaffolding (`scripts/check.sh` runs the suite), `.env.example` now ships sanitized placeholders, and `tools/heartbeat_ping.py` + `agent-heartbeat.timer` keep `.agent/agent-heartbeat.txt` fresh without manual commands.
@@ -49,8 +50,8 @@ _Last updated: 2025-11-12 (late night)_
 - **Quality checks CI** – `.github/workflows/check.yml` now runs ruff, mypy, and pytest on every push/PR with the necessary system deps, keeping GitHub in lockstep with the local `scripts/check.sh`.
 
 ### In Progress — Codex
-- Build authenticated Vinted sampler (mobile-style login, clothing-only guard) and validate a clean batch.
-- Document deep-dive findings (architecture, hardware, UX) and roll into security hardening once sampler is stable.
+- Harden the new Vinted sampler (CF soak tests + Playwright fallback) and monitor the nightly runs.
+- Move into the hardware hardening track (mini PC benchmarks, provisioning scripts, firewall/secrets rollout).
 
 ## Open TODO / Roadmap
 1. Make the sampler resilient to Cloudflare (headless browser or curated retail feeds) so we consistently harvest non-zero listings.

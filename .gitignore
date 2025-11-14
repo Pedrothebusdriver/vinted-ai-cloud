@@ -11,11 +11,18 @@ pi-app/input_images/
 pi-app/converted_images/
 pi-app/backups/
 pi-app/static/thumbs/
+pi-app/data/
+data/
+pi-app/var/
 
 # OS junk
 .DS_Store
 Thumbs.db
 backups/
+.agent/
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
 pi-app/.env*
 pi-app/app/patch*/
 pi-app/tools/

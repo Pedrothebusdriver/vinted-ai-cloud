@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-import os, json, re, glob, math, pathlib, datetime, collections
+import collections
+import json
+import os
+import pathlib
+import re
 
 ROOT = pathlib.Path(".")
 EVALS_DIR = ROOT / "data" / "evals"

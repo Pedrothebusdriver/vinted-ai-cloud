@@ -1,5 +1,6 @@
+import sqlite3
+import time
 from pathlib import Path
-import sqlite3, time
 
 DB_PATH = Path('data') / 'vinted.db'
 

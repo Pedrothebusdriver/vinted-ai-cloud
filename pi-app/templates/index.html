@@ -11,6 +11,7 @@
     h1 { margin: 0 0 12px; }
     .row { display:flex; align-items:center; gap:12px; margin:12px 0 8px; flex-wrap:wrap; }
     input[type=file] { padding: 6px; }
+    input[type=password], input[type=text] { padding:6px 10px; border:1px solid var(--border); border-radius:10px; min-width:200px; }
     button { padding: 8px 14px; border-radius: 10px; border: 1px solid var(--border); cursor: pointer; background:#fff; }
     small { color: var(--muted); }
     .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
@@ -27,6 +28,9 @@
 </head>
 <body>
   <h1>Vinted Pi</h1>
+  <div class="hint" style="margin-bottom:14px;">
+    <a href="/learning">📊 View learning monitor</a>
+  </div>
 
   <form id="uploadForm" action="/api/upload" method="post" enctype="multipart/form-data">
     <div class="row">
@@ -35,6 +39,10 @@
              multiple />
       <button id="addBtn" type="submit">Add Item</button>
       <small id="chosen">No files chosen</small>
+    </div>
+    <div class="row">
+      <input id="uploadKey" type="password" placeholder="Upload API key" autocomplete="off" />
+      <small>Needed when `/api/upload` is exposed publicly. Stored locally in your browser.</small>
     </div>
     <div class="hint">Tip: include <b>one close‑up photo of the brand/size label</b> for best accuracy. Women’s/children’s sizes are supported.</div>
   </form>
@@ -46,6 +54,15 @@
   const files = document.getElementById('files');
   const chosen = document.getElementById('chosen');
   const addBtn = document.getElementById('addBtn');
+  const uploadKey = document.getElementById('uploadKey');
+  const KEY_STORAGE_ID = 'uploadApiKey';
+
+  if (uploadKey) {
+    uploadKey.value = window.localStorage.getItem(KEY_STORAGE_ID) || '';
+    uploadKey.addEventListener('input', () => {
+      window.localStorage.setItem(KEY_STORAGE_ID, uploadKey.value.trim());
+    });
+  }
 
   files.addEventListener('change', () => {
     const n = files.files.length;
@@ -58,7 +75,23 @@
     try {
       addBtn.disabled = true; addBtn.innerHTML = '<span class="sp"></span> Uploading…';
       const fd = new FormData(e.target);
-      const r = await fetch('/api/upload', { method: 'POST', body: fd });
+      const headers = {};
+      const key = uploadKey?.value.trim();
+      if (key) {
+        headers['X-Upload-Key'] = key;
+      }
+      const r = await fetch('/api/upload', { method: 'POST', body: fd, headers });
+      if (r.status === 401) {
+        alert('Upload API key missing or invalid.');
+        return;
+      }
+      if (r.status === 429) {
+        alert('Rate limit hit – wait a moment and try again.');
+        return;
+      }
+      if (!r.ok) {
+        throw new Error(`Upload failed with status ${r.status}`);
+      }
       const data = await r.json();
       chosen.textContent = `Queued item #${data.item_id}`;
       files.value = '';

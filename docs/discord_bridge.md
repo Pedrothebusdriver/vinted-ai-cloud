@@ -29,16 +29,32 @@ also lets Codex reply back into Discord without leaving the terminal.
    python3 -m venv .venv && source .venv/bin/activate
    pip install -r requirements.txt
    ```
-3. **Configure env**
+3. **Create a secrets file (recommended)**
+   ```bash
+   mkdir -p ~/secrets && chmod 700 ~/secrets
+   cat <<'JSON' >~/secrets/discord_bot.json
+   {
+     "token": "BOT_TOKEN_HERE",
+     "channel_ids": ["123456789012345678"],
+     "allowed_user_ids": [],
+     "forward_url": null,
+     "forward_token": null
+   }
+   JSON
+   ```
+   - `channel_ids` accepts one or more numeric Discord channel IDs.
+   - You can still override anything via env vars later if needed.
+4. **Configure env**
    Add the following to `pi-app/.env` (or any file sourced before starting the
    bot):
    ```bash
-   export DISCORD_BRIDGE_TOKEN="bot-token-here"
-   export DISCORD_BRIDGE_CHANNELS="123456789012345678,987654321098765432"
-   # optional:
-   # export DISCORD_BRIDGE_ALLOW_USERS="1234,5678"   # whitelist user IDs
-   # export DISCORD_BRIDGE_FORWARD_URL="http://127.0.0.1:4040/agent/inbox"
-   # export DISCORD_BRIDGE_FORWARD_TOKEN="secret"    # bearer token for forward URL
+   export DISCORD_BRIDGE_CONFIG="${HOME}/secrets/discord_bot.json"
+   # optional overrides:
+   # export DISCORD_BRIDGE_TOKEN="..."                 # override token from JSON
+   # export DISCORD_BRIDGE_CHANNELS="123,456"          # override channels
+   # export DISCORD_BRIDGE_ALLOW_USERS="1234,5678"     # whitelist user IDs
+   # export DISCORD_BRIDGE_FORWARD_URL="http://..."    # webhook forward target
+   # export DISCORD_BRIDGE_FORWARD_TOKEN="secret"
    ```
 4. **Run the bot**
    ```bash
@@ -54,26 +70,34 @@ channels will start populating `.agent/discord-bridge/inbox/`.
 Use the helper script to queue a reply:
 
 ```bash
-.venv/bin/python tools/discord_bridge_send.py "Ship it 🚀"
-# or reply to a specific message id
-.venv/bin/python tools/discord_bridge_send.py --reply-to 1187349871234 "On it."
+.venv/bin/python tools/discord_bridge_send.py --sender "Agent#1" "Ship it 🚀"
+# or reply to a specific message id (copy jump_url → ID)
+.venv/bin/python tools/discord_bridge_send.py --sender "Agent#1" --reply-to 1187349871234 "On it."
 ```
 
 The bridge bot polls `.agent/discord-bridge/outbox/` every ~2 seconds, posts the
 message to Discord, then moves the payload into `.agent/discord-bridge/sent/`
 (or `.agent/discord-bridge/failed/` on errors).
 
-Attachments can be added via `--file path/to/screenshot.png`.
+Tips:
 
-## Optional: systemd unit
+- Set `DISCORD_BRIDGE_SENDER=Agent#1` in your shell if you don’t want to pass
+  `--sender` every time. The value becomes the prefix (`[Agent#1] …`) that shows
+  up in Discord.
+- Attachments can be added via `--file path/to/screenshot.png` (repeat the flag
+  to attach multiple files).
 
-Copy the sample unit to keep the bot alive on the Pi:
+## Optional: systemd units
+
+Copy the sample units to keep everything alive on the Pi:
 
 ```bash
 mkdir -p ~/.config/systemd/user
 cp scripts/systemd/discord-bridge.service ~/.config/systemd/user/
+cp scripts/systemd/discord-bridge-relay.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now discord-bridge.service
+systemctl --user enable --now discord-bridge-relay.service
 ```
 
 The service assumes the repo lives at `~/vinted-ai-cloud` and that the Python
@@ -83,6 +107,7 @@ Check logs with:
 
 ```bash
 journalctl --user -u discord-bridge.service -f
+journalctl --user -u discord-bridge-relay.service -f
 ```
 
 ## Consuming messages
@@ -97,6 +122,49 @@ for new payloads. Each entry includes:
 
 If you set `DISCORD_BRIDGE_FORWARD_URL`, the same payload is POSTed to that URL
 in real time so you can trigger push notifications, queue Jenkins jobs, etc.
+
+## Relay integration (push Discord → every agent)
+
+`tools/discord_bridge_relay.py` watches the Discord inbox and writes new entries
+into `.agent/relay/` so each agent’s inbox gets the same message automatically.
+Give it the relay inbox names you want to target (comma separated):
+
+```bash
+.venv/bin/python tools/discord_bridge_relay.py --agents codex-cli,codex-discord
+```
+
+- Add `--loop` (or use the `discord-bridge-relay.service` unit above) to keep it
+  running continuously.
+- Agents can then run `python tools/agent_relay.py pull --agent codex-cli --mark-read`
+  to read Discord traffic just like any other relay message.
+
+### Suggested naming convention
+
+- Give each agent a consistent relay inbox (`codex-cli`, `codex-discord`, `codex-hardware`, …).
+- Set `DISCORD_BRIDGE_SENDER=Agent#1` (or similar) in each agent’s env so replies
+  show up in Discord as `[Agent#1] message`, making it obvious who spoke.
+
+## Agent quick-start
+
+1. **Receive messages**  
+   ```bash
+   python tools/agent_relay.py pull --agent codex-cli --mark-read
+   ```
+   (Replace `codex-cli` with your relay inbox name.) You’ll see Discord posts in
+   the format `[Discord:DisplayName] message`.
+
+2. **Reply**  
+   ```bash
+   export DISCORD_BRIDGE_SENDER="Agent#1"   # run once per shell
+   python tools/discord_bridge_send.py "On it."
+   ```
+   The bot posts `[Agent#1] On it.` back into the Discord channel. Use
+   `--file` to attach screenshots.
+
+3. **Keep the service running**  
+   Ensure both `discord-bridge.service` and `discord-bridge-relay.service` are
+   enabled via systemd so inbound/outbound flows stay live without manual
+   intervention.
 
 ## Directory layout
 

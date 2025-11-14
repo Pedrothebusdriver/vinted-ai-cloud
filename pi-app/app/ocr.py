@@ -1,5 +1,8 @@
 from pathlib import Path
-import cv2, pytesseract
+
+import cv2
+import pytesseract
+
 
 class OCR:
     def read_text(self, image_path: Path) -> str:

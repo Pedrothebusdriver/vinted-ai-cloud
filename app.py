@@ -1,13 +1,13 @@
-import os
-import re
 import math
-import time
+import os
 import random
-from typing import List, Dict, Any, Optional
+import re
+import time
+from typing import Any, Dict, List, Optional
 
 import requests
-from flask import Flask, request, jsonify
 from bs4 import BeautifulSoup
+from flask import Flask, jsonify, request
 
 # =========================
 # Config (env overrides)
@@ -27,10 +27,22 @@ CLAMP_MAX = float(os.getenv("CLAMP_MAX", "500"))
 
 UA_LIST = [
     # tiny + realistic; rotated to avoid being blocked
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
-    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Mobile Safari/537.36",
+    (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36"
+    ),
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36"
+    ),
+    (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 16_7 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+    ),
+    (
+        "Mozilla/5.0 (Linux; Android 13; Pixel 7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Mobile Safari/537.36"
+    ),
 ]
 
 # tiny in-memory cache with TTL (kept simple on purpose)
@@ -107,7 +119,8 @@ def _normalize_amount_string(s: str) -> Optional[float]:
         if ch.isdigit():
             cleaned.append(ch)
         elif ch == "." and not dot:
-            cleaned.append("."); dot = True
+            cleaned.append(".")
+            dot = True
         # else ignore
 
     s2 = "".join(cleaned)
@@ -215,7 +228,12 @@ def fetch_vinted_api(query: str, session: requests.Session) -> List[Dict[str, An
             data = r.json()
             items = data.get("items") or data.get("data") or []
             for it in items:
-                title = (it.get("title") or it.get("description") or it.get("brand_title") or "Item")
+                title = (
+                    it.get("title")
+                    or it.get("description")
+                    or it.get("brand_title")
+                    or "Item"
+                )
                 price_gbp = _coerce_price_gbp_from_api_item(it)
 
                 web_url = it.get("url") or it.get("path")
@@ -227,7 +245,13 @@ def fetch_vinted_api(query: str, session: requests.Session) -> List[Dict[str, An
                         web_url = f"{VINTED_BASE}/items/{iid}"
 
                 if price_gbp is not None:
-                    results.append({"title": str(title)[:120], "price_gbp": price_gbp, "url": web_url or VINTED_BASE})
+                    results.append(
+                        {
+                            "title": str(title)[:120],
+                            "price_gbp": price_gbp,
+                            "url": web_url or VINTED_BASE,
+                        }
+                    )
             if results:
                 break
         except Exception:
@@ -266,7 +290,13 @@ def fetch_vinted_html(query: str, session: requests.Session) -> List[Dict[str, A
 
             title = a.get("aria-label") or a.get_text(" ", strip=True) or "Item"
             if price_val is not None:
-                results.append({"title": title[:120], "price_gbp": float(price_val), "url": web_url})
+                results.append(
+                    {
+                        "title": title[:120],
+                        "price_gbp": float(price_val),
+                        "url": web_url,
+                    }
+                )
     except Exception:
         return results
     return results

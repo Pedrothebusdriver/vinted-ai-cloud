@@ -1,40 +1,20 @@
-version: "3.9"
+FROM python:3.12-slim
 
-services:
-  cloud-helper:
-    build:
-      context: .
-      dockerfile: Dockerfile.helper
-    environment:
-      VINTED_BASE: "https://www.vinted.co.uk"
-      CACHE_TTL: "900"
-      OUTLIER_FILTER: "1"
-      CLAMP_MIN: "8"        # <-- guards against tiny junk prices
-      CLAMP_MAX: "500"
-    ports:
-      - "5055:5055"
-    command: >
-      gunicorn app:app
-      --bind 0.0.0.0:5055
-      --workers 1 --threads 2 --timeout 120
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-  pi-ui:
-    build:
-      context: ./pi-app
-      dockerfile: Dockerfile
-    environment:
-      DISCORD_WEBHOOK_URL: "${DISCORD_WEBHOOK_URL}"  # set at run time
-      COMPS_BASE_URL: "http://cloud-helper:5055"
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./pi-app/data:/app/data
-      - ./pi-app/input_images:/app/input_images
-      - ./pi-app/converted_images:/app/converted_images
-      - ./pi-app/backups:/app/backups
-      - ./pi-app/static:/app/static
-    depends_on:
-      - cloud-helper
-    command: >
-      uvicorn app.main:app
-      --host 0.0.0.0 --port 8080
+WORKDIR /app
+
+# Install lightweight build tools so lxml/bs4 wheels can install cleanly
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+COPY . /app
+
+EXPOSE 5055
+
+CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:5055", "--workers", "1", "--threads", "2", "--timeout", "120"]
