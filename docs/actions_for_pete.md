@@ -73,7 +73,18 @@ Once we have your choice, we’ll script the install + benchmarking flow and pre
 
 ---
 
-## 7. Discord Bridge Go-Live
+## 7. Replace Agent 3 (lacks Pi access)
+**Goal:** onboard a new agent with proper SSH access since the current “Agent 3” cannot run terminal commands.**
+
+1. Collect the new agent’s SSH public key (run `ssh-keygen -t ed25519 -C "agent3"` and send the `.pub`).
+2. Add it to the Pi per `docs/manuals/pi-access.md` (or drop the `.pub` on the Pi and ask us to append it).
+3. Share the connection command (`ssh -i ~/.ssh/agent3_key pi@100.85.116.21`) and remind them to set up the repo/venv.
+
+Once the replacement agent confirms they can run commands, mark this item done and archive the old agent’s key if needed.
+
+---
+
+## 8. Discord Bridge Go-Live
 **Goal:** get the shared Discord ↔︎ Codex bridge online so all agents (CLI + Discord) can coordinate in one channel.
 
 1. Finalize the bot token + channel IDs (see item #1) and confirm which Discord channel(s) we should mirror.
