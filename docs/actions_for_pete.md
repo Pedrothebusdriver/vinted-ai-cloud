@@ -84,7 +84,17 @@ Once the replacement agent confirms they can run commands, mark this item done a
 
 ---
 
-## 8. Discord Bridge Go-Live
+## 8. Re-authorize Discord Bridge Bot
+**Goal:** refresh the bot’s permissions so it can actually send messages again.**
+
+1. In the Discord Developer Portal → Bot tab, tick `View Channel`, `Send Messages`, `Read Message History`, `Attach Files` (and any other text perms you want).
+2. Go to **OAuth2 → URL Generator**, select `bot` scope + the same permissions, copy the generated URL, and open it to re-add the bot to your server.
+3. Confirm in Server Settings → Integrations → Bot that those permissions show as green checks.
+4. Ping us so we can restart the bridge services and verify replies land in Discord.
+
+---
+
+## 9. Discord Bridge Go-Live
 **Goal:** get the shared Discord ↔︎ Codex bridge online so all agents (CLI + Discord) can coordinate in one channel.
 
 1. Finalize the bot token + channel IDs (see item #1) and confirm which Discord channel(s) we should mirror.
