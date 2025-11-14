@@ -127,16 +127,78 @@ in real time so you can trigger push notifications, queue Jenkins jobs, etc.
 
 `tools/discord_bridge_relay.py` watches the Discord inbox and writes new entries
 into `.agent/relay/` so each agent’s inbox gets the same message automatically.
-Give it the relay inbox names you want to target (comma separated):
+
+### Quick check (manual)
 
 ```bash
 .venv/bin/python tools/discord_bridge_relay.py --agents codex-cli,codex-discord
 ```
 
-- Add `--loop` (or use the `discord-bridge-relay.service` unit above) to keep it
-  running continuously.
-- Agents can then run `python tools/agent_relay.py pull --agent codex-cli --mark-read`
-  to read Discord traffic just like any other relay message.
+Add `--loop` to keep it running in the foreground. When ready for 24/7
+operation, use one of the options below.
+
+### Option A: systemd on the Pi
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp scripts/systemd/discord-bridge-relay.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now discord-bridge-relay.service
+journalctl --user -u discord-bridge-relay.service -f
+```
+
+The service reads the same env file as the main bridge and automatically
+restarts on failure.
+
+### Option B: macOS LaunchAgent (per agent)
+
+Create a plist similar to:
+
+```bash
+cat <<'EOF' > ~/Library/LaunchAgents/com.codex.agent-relay-cli.plist
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.codex.agent-relay-cli</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/you/vinted-ai-cloud/tools/agent_relay_stream.py</string>
+        <string>--agent</string><string>codex-cli</string>
+        <string>--interval</string><string>10</string>
+        <string>--quiet</string>
+    </array>
+    <key>WorkingDirectory</key><string>/Users/you/vinted-ai-cloud</string>
+    <key>StandardOutPath</key><string>/tmp/relay-codex-cli.log</string>
+    <key>StandardErrorPath</key><string>/tmp/relay-codex-cli.err</string>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+</dict>
+</plist>
+EOF
+
+launchctl unload ~/Library/LaunchAgents/com.codex.agent-relay-cli.plist >/dev/null 2>&1 || true
+launchctl load ~/Library/LaunchAgents/com.codex.agent-relay-cli.plist
+```
+
+Duplicate the plist (change the label + `--agent` flag) for `codex-discord` or
+any other inbox you want to keep in sync on your Mac.
+
+### Option C: agent-relay@ systemd template
+
+There’s also a generic unit (`scripts/systemd/agent-relay@.service`) if you
+want one per agent on the Pi:
+
+```bash
+cp scripts/systemd/agent-relay@.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now agent-relay@codex-cli.service
+systemctl --user enable --now agent-relay@codex-discord.service
+```
+
+Each instance runs `tools/agent_relay_stream.py --agent <name>` so messages are
+drained without manual pulls.
 
 ### Suggested naming convention
 
