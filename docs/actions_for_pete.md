@@ -4,7 +4,7 @@ Use this list so every agent is aligned on what we currently need from you.
 Each item includes very simple “do this” steps.
 
 ---
-## 1. Discord Bridge Bot Token
+## 1. Discord Bridge Bot Token — **Status: ✅ Done (token saved under `~/secrets/discord_bot.json`)**
 **Goal:** let the CLI read/reply to Discord when you’re AFK.
 
 1. Visit https://discord.com/developers/applications → create a bot → copy its token.
@@ -34,7 +34,7 @@ Each item includes very simple “do this” steps.
 (If you already created a key, just confirm it’s `X-Upload-Key` so we can align docs + code.)
 
 ---
-## 3. Vinted URL Seeds
+## 3. Vinted URL Seeds — **Status: ✅ Done (seed list filled 14 Nov)**
 **Goal:** manual testing with real listings while the new scraper finishes.
 
 1. Open `docs/manuals/vinted-url-seeds.md` in the repo.
@@ -52,7 +52,7 @@ Each item includes very simple “do this” steps.
 
 ---
 
-## 5. Provide SSH Keys for New Agents
+## 5. Provide SSH Keys for New Agents — **Status: ✅ Done (Agent 2 + new key deployed)**
 **Goal:** give additional agents the same Pi access as the primary CLI.**
 
 1. Follow the guide in `docs/manuals/pi-access.md`.
@@ -73,7 +73,7 @@ Once we have your choice, we’ll script the install + benchmarking flow and pre
 
 ---
 
-## 7. Replace Agent 3 (lacks Pi access)
+## 7. Replace Agent 3 (lacks Pi access) — **Status: ✅ Done (new key + access confirmed)**
 **Goal:** onboard a new agent with proper SSH access since the current “Agent 3” cannot run terminal commands.**
 
 1. Collect the new agent’s SSH public key (run `ssh-keygen -t ed25519 -C "agent3"` and send the `.pub`).
@@ -84,7 +84,7 @@ Once the replacement agent confirms they can run commands, mark this item done a
 
 ---
 
-## 8. Re-authorize Discord Bridge Bot
+## 8. Re-authorize Discord Bridge Bot — **Status: ✅ Done (perms already granted)**
 **Goal:** refresh the bot’s permissions so it can actually send messages again.**
 
 1. In the Discord Developer Portal → Bot tab, tick `View Channel`, `Send Messages`, `Read Message History`, `Attach Files` (and any other text perms you want).
@@ -94,7 +94,7 @@ Once the replacement agent confirms they can run commands, mark this item done a
 
 ---
 
-## 9. Discord Bridge Go-Live
+## 9. Discord Bridge Go-Live — **Status: ✅ Done (bridge + relay live on Pi)**
 **Goal:** get the shared Discord ↔︎ Codex bridge online so all agents (CLI + Discord) can coordinate in one channel.
 
 1. Finalize the bot token + channel IDs (see item #1) and confirm which Discord channel(s) we should mirror.
@@ -125,6 +125,17 @@ This can wait until you want us to handle more Discord upkeep; just keeping it o
 3. Note down any naming scheme you prefer so we can reserve bot usernames ahead of time.
 
 For now the shared bot + `[Agent#X]` prefixes work; this item is just to revisit when we want individual presences.
+
+---
+
+## 9. Mobile App Repo Split (tracking now)
+**Goal:** keep the new Expo mobile app (≈1.2 GB with `node_modules` + `ios/`) safe while we finish the upload work.**
+
+1. The `mobile/` directory is ours (Expo React Native prototype) and currently **in active use**—please do **not** delete or move it right now. It’s excluded from git because of the dependency tree, but it must stay in `vinted-ai-cloud` until we finish the upload milestone.
+2. Once the upload fixes land and we cut a clean branch, I’ll archive the necessary files (source + lockfiles) and either check them in with a curated `.gitignore` or split them into `vinted-mobile`. I’ll flag you before that happens so backups don’t balloon.
+3. If you need space temporarily, let me know and I can prune the build artifacts (`ios/build`, `.expo`, etc.) without touching the source—just don’t wipe the entire folder.
+
+I’ll update this section again after the upload feature is merged and the repo split/cleanup plan is ready so no one accidentally removes the mobile app.
 
 ---
 

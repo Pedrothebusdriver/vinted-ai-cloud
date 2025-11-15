@@ -1,6 +1,11 @@
 # Python / venv
 *.pyc
 __pycache__/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
 pi-app/.venv/
 
 # Local env & secrets
