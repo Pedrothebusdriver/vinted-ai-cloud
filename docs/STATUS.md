@@ -27,7 +27,7 @@ _Last updated: 2025-11-12 (late night)_
 
 ## Compliance Guard
 - Located at `pi-app/app/compliance.py`.
-- Checks min dimension (default 240 px), large faces, and full-body detections via OpenCV.
+- Checks min dimension (default 240 px), file size, blur (Laplacian variance), large faces, and full-body detections via OpenCV HOG.
 - Uploads/sampler images failing the check are deleted, alerts posted, and drafts marked `rejected`.
 
 ## Latest Progress (Nov 12)

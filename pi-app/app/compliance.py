@@ -1,4 +1,4 @@
-"""Basic image compliance checks used by the Pi pipeline."""
+"""Image compliance checks to keep uploads Pi-safe and marketplace friendly."""
 
 from __future__ import annotations
 
@@ -7,19 +7,27 @@ from pathlib import Path
 from typing import Tuple
 
 import cv2
-
 MIN_DIMENSION = int(os.getenv("COMPLIANCE_MIN_DIMENSION", "240"))
 MAX_FILE_BYTES = int(os.getenv("COMPLIANCE_MAX_FILE_BYTES", str(15 * 1024 * 1024)))
 MAX_FACE_RATIO = float(os.getenv("COMPLIANCE_MAX_FACE_RATIO", "0.45"))
+MAX_BODY_RATIO = float(os.getenv("COMPLIANCE_MAX_BODY_RATIO", "0.35"))
+BLUR_THRESHOLD = float(os.getenv("COMPLIANCE_MIN_LAPLACE", "35"))
+BODY_CONFIDENCE = float(os.getenv("COMPLIANCE_BODY_CONFIDENCE", "0.3"))
 
-_FACE_DETECTOR = None
 _CASCADE_PATH = getattr(cv2.data, "haarcascades", "")
+_FACE_DETECTOR = None
 if _CASCADE_PATH:
     cascade_file = Path(_CASCADE_PATH) / "haarcascade_frontalface_default.xml"
     if cascade_file.exists():
-        detector = cv2.CascadeClassifier(str(cascade_file))
-        if not detector.empty():
-            _FACE_DETECTOR = detector
+        face_detector = cv2.CascadeClassifier(str(cascade_file))
+        if not face_detector.empty():
+            _FACE_DETECTOR = face_detector
+
+_HOG = cv2.HOGDescriptor()
+try:
+    _HOG.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+except Exception:  # pragma: no cover - OpenCV guard
+    _HOG = None
 
 
 def _percentage(area: int, total: int) -> float:
@@ -45,6 +53,39 @@ def _detect_face_ratio(image) -> float:
     return _percentage(face_area, w * h)
 
 
+def _detect_body_ratio(image) -> float:
+    if _HOG is None:
+        return 0.0
+    height, width = image.shape[:2]
+    total = width * height
+    try:
+        rects, weights = _HOG.detectMultiScale(
+            image,
+            winStride=(8, 8),
+            padding=(8, 8),
+            scale=1.05,
+        )
+    except Exception:  # pragma: no cover - GPU/OpenCV guard
+        return 0.0
+
+    ratios = []
+    for idx, (x, y, w, h) in enumerate(rects):
+        weight = weights[idx][0] if len(weights) > idx else 1.0
+        if weight < BODY_CONFIDENCE:
+            continue
+        ratios.append(_percentage(w * h, total))
+    return max(ratios, default=0.0)
+
+
+def _variance_of_laplacian(image) -> float:
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    return cv2.Laplacian(gray, cv2.CV_64F).var()
+
+
+def _is_blurry(image) -> bool:
+    return _variance_of_laplacian(image) < BLUR_THRESHOLD
+
+
 def check_image(image_path: Path) -> Tuple[bool, str]:
     """
     Validate an image for downstream listing use.
@@ -67,10 +108,18 @@ def check_image(image_path: Path) -> Tuple[bool, str]:
     if min(height, width) < MIN_DIMENSION:
         return False, f"image too small ({width}x{height})"
 
+    if _is_blurry(img):
+        return False, "image too blurry"
+
     face_ratio = _detect_face_ratio(img)
     if face_ratio > MAX_FACE_RATIO:
         pct = round(face_ratio * 100, 1)
         return False, f"face occupies {pct}% of the frame"
+
+    body_ratio = _detect_body_ratio(img)
+    if body_ratio > MAX_BODY_RATIO:
+        pct = round(body_ratio * 100, 1)
+        return False, f"full body occupies {pct}% of the frame"
 
     return True, ""
 

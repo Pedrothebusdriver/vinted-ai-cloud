@@ -1,0 +1,14 @@
+[Unit]
+Description=Agent relay stream for %i
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/vinted-ai-cloud
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/vinted-ai-cloud/.venv/bin/python tools/agent_relay_stream.py --agent %i --interval 1.0
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

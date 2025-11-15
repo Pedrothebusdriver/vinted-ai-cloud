@@ -9,6 +9,11 @@ import requests
 from bs4 import BeautifulSoup
 from flask import Flask, jsonify, request
 
+try:
+    import cloudscraper
+except ImportError:  # pragma: no cover - optional dependency
+    cloudscraper = None
+
 # =========================
 # Config (env overrides)
 # =========================
@@ -161,8 +166,11 @@ def uniq(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             out.append(it)
     return out
 
-def mk_session() -> requests.Session:
-    s = requests.Session()
+def mk_session(use_cloudscraper: bool = False):
+    if use_cloudscraper and cloudscraper:
+        s = cloudscraper.create_scraper()
+    else:
+        s = requests.Session()
     s.headers.update({
         "User-Agent": random.choice(UA_LIST),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -344,13 +352,24 @@ def get_comps(brand: str, item_type: str, size: str, colour: str) -> Dict[str, A
 
     # 1) Try API
     items = fetch_vinted_api(q, sess)
+    source = "api"
 
     # 2) Fallback HTML if empty
-    source = "api"
     if not items:
         time.sleep(0.4)
         items = fetch_vinted_html(q, sess)
         source = "html"
+
+    # 3) Cloudscraper retry if available and still empty
+    if not items and cloudscraper:
+        scraper_session = mk_session(use_cloudscraper=True)
+        time.sleep(0.2)
+        items = fetch_vinted_api(q, scraper_session)
+        source = "cloudscraper-api"
+        if not items:
+            time.sleep(0.4)
+            items = fetch_vinted_html(q, scraper_session)
+            source = "cloudscraper-html" if items else source
 
     items = uniq(items)[:MAX_ITEMS]
     stats = compute_stats(items)

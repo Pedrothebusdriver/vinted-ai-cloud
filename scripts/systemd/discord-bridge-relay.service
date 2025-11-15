@@ -1,0 +1,14 @@
+[Unit]
+Description=Discord bridge → Agent relay
+After=discord-bridge.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/vinted-ai-cloud
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/vinted-ai-cloud/.venv/bin/python tools/discord_bridge_relay.py --loop --agents codex-cli,codex-discord
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
