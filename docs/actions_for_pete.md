@@ -139,4 +139,73 @@ I’ll update this section again after the upload feature is merged and the repo
 
 ---
 
+## 10. Expo Upload Smoke-Test
+**Goal:** confirm the refreshed mobile app (camera + library flow) reaches `/api/upload` so Codex can push the code + continue backend hardening.**
+
+1. On your Mac: `cd ~/vinted-ai-cloud/mobile` and `cp .env.local.example .env.local` (or export `EXPO_PUBLIC_API_BASE=http://100.85.116.21:8080` before launching Expo).
+2. Run `npx expo start --web` (browser) or `npx expo start --tunnel` (scan with Expo Go) / `npx expo start --ios`.
+3. In the app:
+   - Tap **Select Photos**, choose at least 2 existing images, optionally paste metadata JSON, hit **Upload**, and confirm `/api/upload` receives them (watch logs or Discord draft posts).
+   - Tap **Take Photo**, capture a new shot, upload, and note the draft number shown under the button.
+4. When both flows succeed, let Codex know (“Expo uploads confirmed, drafts #__ and #__”). I’ll then commit/push the mobile sources and switch back to backend stabilization.
+
+If any part fails, screenshot/log the error so I can fix it.
+
+---
+
+## 10. Run the new compliance test suite
+**Goal:** verify the Laplacian/HOG compliance upgrades locally.**
+
+1. On your Mac (or Pi), cd into `~/vinted-ai-cloud`.
+2. Make sure the venv is active:
+   ```bash
+   python3 -m venv .venv  # if it doesn’t exist
+   source .venv/bin/activate
+   ```
+3. Install pytest (only needed once):
+   ```bash
+   python -m pip install --upgrade pytest
+   ```
+4. Execute the targeted test:
+   ```bash
+   python -m pytest tests/test_compliance.py
+   ```
+5. Drop a ✅ here (or the error message) so we know OpenCV/blur thresholds behave on your setup.
+
+---
+
+## 11. Enable bridge + relay systemd services on the Pi
+**Goal:** keep Discord <-> relay running 24/7 without manual starts.**
+
+1. `ssh pi-vinted` and `cd ~/vinted-ai-cloud`.
+2. Pull latest `main` and refresh dependencies:
+   ```bash
+   git pull
+   python3 -m venv .venv && source .venv/bin/activate
+   pip install -r requirements.txt -r pi-app/requirements.txt
+   ```
+3. Install the units:
+   ```bash
+   mkdir -p ~/.config/systemd/user
+   cp scripts/systemd/discord-bridge.service ~/.config/systemd/user/
+   cp scripts/systemd/discord-bridge-relay.service ~/.config/systemd/user/
+   cp scripts/systemd/agent-relay@.service ~/.config/systemd/user/
+   systemctl --user daemon-reload
+   ```
+4. Start them:
+   ```bash
+   systemctl --user enable --now discord-bridge.service
+   systemctl --user enable --now discord-bridge-relay.service
+   systemctl --user enable --now agent-relay@codex-cli.service
+   systemctl --user enable --now agent-relay@codex-discord.service
+   ```
+5. Watch logs to confirm messages flow:
+   ```bash
+   journalctl --user -u discord-bridge.service -f
+   journalctl --user -u discord-bridge-relay.service -f
+   ```
+6. When you’re happy, tick this item off so future agents know services are persistent.
+
+---
+
 Add more items here if you (or another agent) need new inputs from Pete. Keep the instructions simple so anyone can follow them.

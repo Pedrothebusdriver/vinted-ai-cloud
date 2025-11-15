@@ -62,18 +62,23 @@ Need the bigger picture (hardware options, refactor plan, sampler/cloud helper r
 
 ## Development workflow
 
-1. Create a local venv and install runtime deps as usual.
-2. Install dev tooling once:
+1. Create/activate a venv and install runtime deps:
    ```bash
-   pip install -r requirements-dev.txt
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt -r pi-app/requirements.txt
    ```
-3. Run the full lint/type/test suite via `./scripts/check.sh` (creates `.venv` if missing).
+2. Install the lightweight dev tools (optional but recommended):
+   ```bash
+   python -m pip install --upgrade pytest
+   ```
+3. Run the targeted compliance test before pushing:
+   ```bash
+   python -m pytest tests/test_compliance.py
+   ```
+4. (Optional) add your preferred linters/formatters—none are enforced yet, so feel free to layer on `ruff`, `black`, etc., in your local venv.
 
-Tooling is configured in `pyproject.toml`:
-- `ruff` for lint/import sorting
-- `mypy` for type checks
-- `pytest` (async-enabled) under `tests/`
-- GitHub Actions runs `.github/workflows/check.yml` on every push/PR so CI mirrors the local checks automatically.
+CI is minimal today; whenever you add additional tests or linting, capture the commands in this section so every agent can reproduce them locally.
 
 ## Automated heartbeat
 
@@ -106,10 +111,14 @@ npm install
 npm run ios    # or npm run android / npm run web
 ```
 
-Features so far:
+Detailed instructions live in `docs/manuals/expo-upload.md`. Highlights:
 - Upload screen – select multiple photos from the device and send them (with optional JSON metadata) to `/api/upload`.
 - Drafts screen – lists `/api/drafts`, tap to open the existing Pi draft UI.
 - Activity screen – shows recent events from the new `/api/events` endpoint.
+
+## Phone uploads (Shortcuts)
+- Use `docs/manuals/phone-upload.md` for the tap-by-tap Shortcut flow.
+- Expo prototype (above) is the richer UI; both share the same API key + Pi endpoint.
 
 ## Current status (2025-11-11)
 

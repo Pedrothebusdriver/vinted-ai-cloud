@@ -10,6 +10,10 @@ Discord. No coding required.
 - The Discord server where drafts get posted (e.g., “AI Test”).
 - Upload API key string (ask the team; needed any time `/api/upload` is public).
 
+### Optional: Expo mobile prototype (camera + library uploads)
+- Prefer a richer UI with camera support? Follow `docs/manuals/expo-upload.md`.
+- The Expo app and this Shortcut both call `/api/upload`; use whichever fits the situation (Shortcut for quick automation, Expo for manual QA and metadata editing).
+
 ## One-time setup
 1. Open the **Shortcuts** app on your iPhone.
 2. Tap the **+** button (top right) to create a new shortcut.
