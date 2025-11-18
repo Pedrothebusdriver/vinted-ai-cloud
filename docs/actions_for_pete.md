@@ -65,13 +65,13 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 ### 3.1 Connection + state
 
 - [x] Connect screen hits `/health` and stores the URL in context (Nov 17).
-- [ ] Persist the server URL (and upload key once we prompt for it) to `AsyncStorage` inside `ServerProvider`, hydrating it on launch.
+- [x] Persist the server URL (and upload key placeholder) to `AsyncStorage` inside `ServerProvider`, hydrating it on launch (Nov 18).
 - [ ] Add an optional Upload Key input on the Connect screen and include it in every API request’s `X-Upload-Key` header (reuse for `/api/drafts` once auth is enforced).
 
 ### 3.2 Draft experience
 
-- [ ] Create `DraftDetailScreen` that loads a single draft via `GET /api/drafts/{id}`, displays thumbnails + metadata, and surfaces editable fields (title, description, price, status).
-- [ ] Wire `DraftDetailScreen` edits to `PUT /api/drafts/{id}` with optimistic UI feedback.
+- [x] Create `DraftDetailScreen` that loads a single draft via `GET /api/drafts/{id}`, displays thumbnails + metadata, and surfaces editable fields (title, description, price, status). Placeholder data shown if backend not ready (Nov 18).
+- [x] Wire `DraftDetailScreen` edits to `PUT /api/drafts/{id}` with optimistic UI feedback (stubs until backend ships).
 - [ ] Update `DraftListScreen` to render thumbnails (once API returns URLs), show status chips (Draft/Ready), and add a simple filter/toggle for each list.
 
 ### 3.3 Upload + post helper
