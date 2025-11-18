@@ -24,9 +24,14 @@ PY
 
 echo "==> Creating systemd user service..."
 mkdir -p "$HOME/.config/systemd/user"
-cat > "$HOME/.config/systemd/user/vinted-app.service" <<UNIT
+SERVICE_SRC="$APP_DIR/../scripts/systemd/vinted-app.service"
+SERVICE_DEST="$HOME/.config/systemd/user/vinted-app.service"
+if [ -f "$SERVICE_SRC" ]; then
+  cp "$SERVICE_SRC" "$SERVICE_DEST"
+else
+  cat > "$SERVICE_DEST" <<UNIT
 [Unit]
-Description=Vinted Pi MVP (FastAPI)
+Description=FlipLens Core (FastAPI)
 After=network.target
 
 [Service]
@@ -40,6 +45,7 @@ Restart=on-failure
 [Install]
 WantedBy=default.target
 UNIT
+fi
 
 systemctl --user daemon-reload
 systemctl --user enable vinted-app.service

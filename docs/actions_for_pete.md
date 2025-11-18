@@ -1,138 +1,117 @@
 # Actions for Pete – FlipLens MVP
 
-This file tracks what needs to happen **next** for the FlipLens MVP.  
-The goal is to keep this simple and focused so we don’t get distracted.
+Single backlog for FlipLens. Each agent reads this file on startup, grabs the next open task for their role, and updates the checklist as work lands.
 
 ---
 
 ## 0. Ground rules
 
-- FlipLens v1 = **assistant for home Vinted sellers** (not Pro yet).
-- Engine runs on the **Raspberry Pi** for now.
-- No direct bot posting to Vinted in MVP. We generate drafts and then help the user post manually in the Vinted app.
-- Multi-agent / Discord relay stuff is **paused** until FlipLens MVP is working.
+- FlipLens v1 = **assistant for home Vinted sellers** (not Vinted Pro yet).
+- Engine stays on the **Raspberry Pi** for MVP (mini PC later).
+- We generate drafts + helper text; no automated posting to Vinted during MVP.
+- Multi-agent / Discord relay automations remain paused until FlipLens core + mobile are working end-to-end.
 
 ---
 
-## 1. Setup & housekeeping
+## 1. Setup & completed checkpoints
 
-### 1.1 PRD in repo
-
-- [ ] Ensure `docs/fliplens_prd.md` exists with the current FlipLens MVP PRD.
-
-### 1.2 Clean mental space
-
-- [ ] Treat this file as the single source of truth for “what to do next”.
-- [ ] Don’t add long brain dumps here – just clear, small tasks.
+- [x] PRD lives at `docs/fliplens_prd.md` (updated 17 Nov).
+- [x] Pi FastAPI already exposes `GET /health` with status + git version (`pi-app/app/main.py`).
+- [x] Expo app scaffolded under `mobile/` with Connect, Draft list, and Upload screens hitting `/health`, `/api/drafts`, and `/api/upload`.
 
 ---
 
-## 2. Milestone 1 – Core API refactor (Vinted AI Core)
+## 2. Core Engine Agent – Milestone 1 (Vinted AI Core)
 
-Goal: Turn the existing FastAPI Pi app into a reusable “Vinted AI Core” with clean HTTP endpoints.
+**Current reality:** All ingest/price/category logic still sits inside `pi-app/app/main.py`; there is no `app/core/*` package yet, `/api/drafts` only lists existing items, and SQLite still uses the old `attributes` table.
 
-### 2.1 New core modules
+### 2.1 Core module extraction
 
-- [ ] Create `app/core/ingest.py`
-  - Function to accept uploaded images and:
-    - Convert / normalise images.
-    - Call OCR to get text.
-    - Extract brand and size from OCR text (reuse existing logic).
-    - Estimate dominant colour.
-    - Call category suggester.
-    - Call pricing helper.
-    - Build and return a draft object.
+- [ ] Create `pi-app/app/core/models.py` (Pydantic or dataclasses) for `Draft`, `DraftPhoto`, `PriceEstimate`, and `CategorySuggestion` so ingest + API code share typed payloads.
+- [ ] Check in `data/vinted_categories.json` (plus a short note or fetch helper) containing the category tree we’ll use for suggestions.
+- [ ] Implement `pi-app/app/core/category_suggester.py` with `suggest_categories(hint_text, ocr_text, filename)` that loads the JSON once, uses keywords + RapidFuzz, and returns the top ranked categories (write pytest coverage).
+- [ ] Implement `pi-app/app/core/pricing.py` that wraps the current COMPS helper, clamps prices between the env min/max, caches results by `(brand, category_id, size, condition)`, and exposes `suggest_price(...) -> {low, mid, high}`.
+- [ ] Extract `_process_item` logic into `pi-app/app/core/ingest.py`: convert + optimise photos, run compliance + OCR, fill brand/size/colour/type, call category/pricing helpers, and return a `Draft` model with ordered `DraftPhoto`s.
+- [ ] Update `/api/upload` to become a thin shim that calls `core.ingest.build_draft(...)` so new endpoints can reuse the same code path while the legacy Shortcut keeps working.
 
-- [ ] Create `app/core/category_suggester.py`
-  - Load `data/vinted_categories.json` (Vinted category tree).
-  - Implement `suggest_categories(hint_text, ocr_text, filename)`:
-    - Use keyword + fuzzy matching to return a ranked list of category candidates.
+### 2.2 Draft API surface
 
-- [ ] Create `app/core/pricing.py`
-  - Wrap existing pricing helper logic.
-  - Implement `suggest_price(brand, category_id, size, condition)`:
-    - Returns `{low, mid, high}`.
-    - Use simple in-memory cache keyed by `(brand, category_id, size)`.
+- [ ] Add request/response schemas (e.g., `pi-app/app/api/schemas.py`) for the draft endpoints so FastAPI returns the same structure everywhere.
+- [ ] Implement `POST /api/drafts` (multipart images + optional JSON metadata) that calls `core.ingest`, saves rows via the new schema, honors upload auth/rate limits, and returns the newly created `Draft`.
+- [ ] Implement `GET /api/drafts/{draft_id}` returning full draft metadata (photos, attributes, price ranges, compliance flags) pulled from SQLite.
+- [ ] Implement `PUT /api/drafts/{draft_id}` allowing the mobile app to update title, description, category_id, status, and `selected_price`, updating `updated_at`.
+- [ ] Expand `GET /api/drafts` to read from the new `drafts` table, include thumbnails + status + price ranges, and accept `?status=` filters for mobile (drop the legacy `attributes` blob once the new response ships).
+- [ ] Expose `POST /api/price` (or upgrade the existing helper) to call `core.pricing.suggest_price` so Pi UI + mobile can re-run pricing on demand.
 
-### 2.2 API endpoints
+### 2.3 Database + Pi UI alignment
 
-- [ ] Add `GET /health`
-  - Returns `{ "status": "ok", "version": "<git_sha_or_semver>" }`.
+- [ ] Update `pi-app/app/db.py` schema + helper functions to use the FlipLens `drafts` columns and `photos.draft_id/file_path/position`, phasing out the `attributes` table for brand/size/colour.
+- [ ] Run persistence through the new schema: `_process_item`, `/api/upload`, and upcoming `/api/drafts` should only write to `drafts`/`photos`, not `attributes`.
+- [ ] Refresh the Pi templates (`pi-app/templates/index.html`, `draft.html`) to read brand/size/colour/prices from the new columns and show status badges (Draft vs Ready).
+- [ ] Wire the existing `scripts/sqlite_migrate.py` helper into a CLI or startup hook so new deployments automatically migrate the DB before serving traffic.
 
-- [ ] Add `POST /api/drafts`
-  - Accepts images + optional hint text.
-  - Uses core modules to produce a draft.
-  - Stores the draft in SQLite.
-  - Returns the draft payload.
+### 2.4 Tests + docs
 
-- [ ] Add `GET /api/drafts/{id}`
-  - Returns stored draft and metadata.
-
-- [ ] Add `PUT /api/drafts/{id}`
-  - Allows updates from the mobile app (title, description, category, price, status).
-
-- [ ] Expose or tidy `POST /api/price`
-  - Make sure pricing logic is in `core/pricing.py` and used by `/api/drafts`.
-
-### 2.3 Database tweaks
-
-- [ ] Ensure SQLite schema has a `drafts` table with at least:
-  - `id`
-  - `created_at`
-  - `updated_at`
-  - `status` (draft, ready, posted)
-  - `brand`
-  - `size`
-  - `colour`
-  - `category_id`
-  - `condition`
-  - `title`
-  - `description`
-  - `price_low`
-  - `price_mid`
-  - `price_high`
-  - `selected_price`
-
-- [ ] Ensure `photos` table is linked to drafts and stores:
-  - `id`
-  - `draft_id`
-  - `file_path`
-  - `position` (ordering).
-
-- [ ] Add a very simple migration note (even if it’s just SQL in another doc).
-
-### 2.4 Keep Pi UI working
-
-- [ ] Update existing Pi HTML routes to use the new core functions.
-- [ ] Confirm basic flows on the Pi still work:
-  - Upload item.
-  - See draft in the Pi UI.
-  - Price suggestions still appear.
+- [ ] Add pytest coverage for `core.category_suggester`, `core.pricing`, and `core.ingest` (mock OCR/compliance where needed).
+- [ ] Add FastAPI integration tests under `pi-app/tests/test_drafts_api.py` that spin up an in-memory SQLite DB and exercise `POST/GET/PUT /api/drafts`.
+- [ ] Update `README.md` + `docs/fliplens_prd.md` with request/response examples for `/api/drafts` once the endpoints ship, and remove stale references to the `attributes` table.
 
 ---
 
-## 3. Milestone 2 – FlipLens mobile app (Expo)
+## 3. Mobile Agent – Milestone 2 (Expo client)
 
-*(We do this after Milestone 1 starts, but it’s listed here so we see the big picture.)*
+**Current reality:** Connect + Draft list screens run, but the base URL is not persisted, uploads still call `/api/upload`, there is no Draft detail/editor, and there is no “Post to Vinted” helper yet.
 
-- [ ] Create `mobile/` folder with an Expo app.
-- [ ] Implement “Connect to server” screen (`/health`).
-- [ ] Implement “New Item” flow (camera/gallery → `POST /api/drafts` → Draft Editor).
-- [ ] Implement Drafts / Ready to post lists.
-- [ ] Implement “Post to Vinted” helper (copy to clipboard + open Vinted app + instructions).
+### 3.1 Connection + state
+
+- [x] Connect screen hits `/health` and stores the URL in context (Nov 17).
+- [ ] Persist the server URL (and upload key once we prompt for it) to `AsyncStorage` inside `ServerProvider`, hydrating it on launch.
+- [ ] Add an optional Upload Key input on the Connect screen and include it in every API request’s `X-Upload-Key` header (reuse for `/api/drafts` once auth is enforced).
+
+### 3.2 Draft experience
+
+- [ ] Create `DraftDetailScreen` that loads a single draft via `GET /api/drafts/{id}`, displays thumbnails + metadata, and surfaces editable fields (title, description, price, status).
+- [ ] Wire `DraftDetailScreen` edits to `PUT /api/drafts/{id}` with optimistic UI feedback.
+- [ ] Update `DraftListScreen` to render thumbnails (once API returns URLs), show status chips (Draft/Ready), and add a simple filter/toggle for each list.
+
+### 3.3 Upload + post helper
+
+- [x] Basic Upload screen selects/takes photos and POSTs to `/api/upload` with optional metadata JSON.
+- [ ] Switch the Upload screen to call the new `POST /api/drafts` endpoint (reuse the stored upload key/header) once the backend exposes it.
+- [ ] Replace the raw metadata textarea with simple inputs (brand, size, condition dropdowns) that compose JSON for the backend.
+- [ ] After upload, show a success state that deep-links to the new draft (navigate to `DraftDetailScreen`).
+- [ ] Add a “Post to Vinted” helper button on `DraftDetailScreen`: copy title/description/price to the clipboard and open the Vinted app (or instructions) so Pete can publish quickly.
 
 ---
 
-## 4. Parking lot (not for MVP)
+## 4. Ops Agent – Deployment + migrations
 
-These are ideas deliberately **not** being worked on right now:
+**Current reality:** `pi-app/setup.sh` writes the systemd unit via heredoc, the SQLite migration helper exists but isn’t part of the deploy flow, and there’s no single doc describing how to upgrade/restart the Pi service for FlipLens.
+
+### 4.1 Service + scripts
+
+- [x] Check `vinted-app.service` into git under `scripts/systemd/` (and update `pi-app/setup.sh` to copy it) so future changes are tracked in the repo. **(2025-11-17 – unit now lives in `scripts/systemd/` and setup copies it.)**
+- [x] Add a helper script (e.g., `scripts/check_vinted_service.sh`) that runs `systemctl --user status vinted-app`, tails the last 100 journal lines, and curls `/health` for quick smoke tests. **(2025-11-17 – script prints status, last 100 logs, and hits `/health`.)**
+- [x] Create a lightweight `scripts/pi/deploy_fliplens.sh` that pulls git, installs requirements, runs migrations, and restarts the systemd unit to avoid hand-written commands each time. **(2025-11-17 – deploy script pulls main, refreshes venvs, runs `scripts/sqlite_migrate.py`, and restarts the unit.)**
+
+### 4.2 Database rollout
+
+- [ ] Add `scripts/backup_sqlite.sh` (or similar) that tars `pi-app/data/vinted.db` with a timestamp before migrations; document where backups live.
+- [ ] Once the core schema changes merge, run `python scripts/sqlite_migrate.py --db ~/vinted-ai-cloud/pi-app/data/vinted.db` on the Pi and log completion (date + SHA) in `.agent/relay` plus this doc.
+- [ ] Update `pi-app/setup.sh` (or the new deploy script) to call `scripts/sqlite_migrate.py` automatically so fresh installs and upgrades don’t skip the FlipLens schema.
+
+### 4.3 Monitoring + docs
+
+- [ ] Create `docs/manuals/pi-deploy.md` covering: pulling latest, backing up SQLite, running the migration helper, restarting `vinted-app.service`, and verifying `/health` + `/api/drafts`.
+- [ ] Update `pi-app/.env.example` once new Draft APIs introduce additional secrets (e.g., dedicated upload key, mobile auth toggle) so operators know what to fill.
+- [ ] Update `docs/manuals/expo-upload.md` (or add a new mobile hand-off doc) describing how to grab the Pi URL/upload key, scan the Expo QR, and run the new Draft editor workflow end-to-end.
+
+---
+
+## 5. Parking lot (not for MVP)
 
 - Discord bridge + `tools/agent_relay.py` multi-agent orchestration.
-- Automated Vinted posting via bots or headless browser.
-- Vinted Pro API integration (for business accounts).
-- Non-clothing categories that need special handling (electronics testing, toys with safety issues, etc.).
-- CharityLoop client app.
-
-We’ll pull from this list only after the FlipLens MVP is running on the Pi.
-
----
+- Automated Vinted posting via bots/headless browsers.
+- Vinted Pro API integration (business accounts).
+- Non-clothing categories needing special handling (electronics, toys, etc.).
+- CharityLoop client app / broader marketplace integrations.

@@ -1,0 +1,15 @@
+[Unit]
+Description=FlipLens Core (FastAPI / uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/vinted-ai-cloud/pi-app
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=%h/vinted-ai-cloud/pi-app/.env
+ExecStart=%h/vinted-ai-cloud/pi-app/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
