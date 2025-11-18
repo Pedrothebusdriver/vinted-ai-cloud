@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Button,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -16,8 +17,10 @@ import { RootStackParamList } from "../navigation/types";
 type Props = NativeStackScreenProps<RootStackParamList, "Connect">;
 
 export const ConnectScreen = ({ navigation }: Props) => {
-  const { baseUrl, setBaseUrl, hydrated } = useServer();
+  const { baseUrl, uploadKey, setBaseUrl, setUploadKey, hydrated } =
+    useServer();
   const [url, setUrl] = useState(baseUrl);
+  const [key, setKey] = useState(uploadKey || "");
   const [status, setStatus] = useState<"idle" | "ok" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -25,35 +28,41 @@ export const ConnectScreen = ({ navigation }: Props) => {
   useEffect(() => {
     if (hydrated) {
       setUrl(baseUrl);
+      setKey(uploadKey || "");
     }
-  }, [baseUrl, hydrated]);
+  }, [baseUrl, hydrated, uploadKey]);
 
   const cleanUrl = useMemo(() => url.trim(), [url]);
+  const cleanKey = useMemo(() => key.trim(), [key]);
 
   const testConnection = useCallback(async () => {
     setPending(true);
     setStatus("idle");
     setMessage(null);
     try {
-      const data = await fetchHealth(cleanUrl || baseUrl);
+      const data = await fetchHealth(cleanUrl || baseUrl, {
+        uploadKey: cleanKey || null,
+      });
       const text = data.version
         ? `Server ready (version ${data.version})`
         : "Server responded.";
       setStatus("ok");
       setMessage(text);
       setBaseUrl(cleanUrl || baseUrl);
+      setUploadKey(cleanKey || null);
     } catch (err: any) {
       setStatus("error");
       setMessage(err.message || "Unable to reach server.");
     } finally {
       setPending(false);
     }
-  }, [baseUrl, cleanUrl, setBaseUrl]);
+  }, [baseUrl, cleanKey, cleanUrl, setBaseUrl, setUploadKey]);
 
   const proceed = useCallback(() => {
     setBaseUrl(cleanUrl || baseUrl);
+    setUploadKey(cleanKey || null);
     navigation.navigate("Drafts");
-  }, [baseUrl, cleanUrl, navigation, setBaseUrl]);
+  }, [baseUrl, cleanKey, cleanUrl, navigation, setBaseUrl, setUploadKey]);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -84,6 +93,21 @@ export const ConnectScreen = ({ navigation }: Props) => {
             {message}
           </Text>
         )}
+        <View style={styles.field}>
+          <Text style={styles.label}>Upload key (optional)</Text>
+          <TextInput
+            style={styles.input}
+            value={key}
+            onChangeText={setKey}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="upload-secret"
+          />
+          <Text style={styles.helper}>
+            We send this as <Text style={styles.code}>X-Upload-Key</Text> on
+            every request once the server enforces auth.
+          </Text>
+        </View>
         <View style={styles.divider} />
         <Button
           title="Continue"
@@ -135,5 +159,22 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderColor: "#f3f4f6",
     marginVertical: 12,
+  },
+  field: {
+    gap: 8,
+  },
+  label: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  helper: {
+    color: "#6b7280",
+  },
+  code: {
+    fontFamily: Platform.select({
+      ios: "Menlo",
+      default: "monospace",
+    }),
+    fontWeight: "600",
   },
 });

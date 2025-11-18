@@ -1,21 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Button,
   Image,
+  Linking,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import {
-  DraftDetail,
-  fetchDraftDetail,
-  updateDraft,
-} from "../api";
+import * as Clipboard from "expo-clipboard";
+import { DraftDetail, DraftStatus, fetchDraftDetail, updateDraft } from "../api";
 import { useServer } from "../state/ServerContext";
 import { RootStackParamList } from "../navigation/types";
 
@@ -39,9 +39,14 @@ const FALLBACK_DRAFT: DraftDetail = {
   ],
 };
 
+const STATUS_OPTIONS: { label: string; value: DraftStatus }[] = [
+  { label: "Draft", value: "draft" },
+  { label: "Ready", value: "ready" },
+];
+
 export const DraftDetailScreen = ({ route }: Props) => {
   const { id } = route.params;
-  const { baseUrl } = useServer();
+  const { baseUrl, uploadKey } = useServer();
   const [draft, setDraft] = useState<DraftDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -49,7 +54,7 @@ export const DraftDetailScreen = ({ route }: Props) => {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
-  const [status, setStatus] = useState("draft");
+  const [status, setStatus] = useState<DraftStatus>("draft");
 
   const priceValue = useMemo(() => {
     if (draft?.selected_price) return draft.selected_price;
@@ -76,7 +81,9 @@ export const DraftDetailScreen = ({ route }: Props) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetchDraftDetail(baseUrl, id);
+      const response = await fetchDraftDetail(baseUrl, id, {
+        uploadKey,
+      });
       setDraft(response);
       syncForm(response);
     } catch (err: any) {
@@ -87,7 +94,7 @@ export const DraftDetailScreen = ({ route }: Props) => {
     } finally {
       setLoading(false);
     }
-  }, [baseUrl, id, syncForm]);
+  }, [baseUrl, id, syncForm, uploadKey]);
 
   useEffect(() => {
     loadDraft();
@@ -101,12 +108,17 @@ export const DraftDetailScreen = ({ route }: Props) => {
     setError(null);
     try {
       const parsedPrice = price.trim() ? Number(price.trim()) : undefined;
-      await updateDraft(baseUrl, draft.id, {
-        title,
-        description,
-        status,
-        price: parsedPrice,
-      });
+      await updateDraft(
+        baseUrl,
+        draft.id,
+        {
+          title,
+          description,
+          status,
+          price: parsedPrice,
+        },
+        { uploadKey }
+      );
       setDraft((prev) =>
         prev
           ? {
@@ -123,7 +135,30 @@ export const DraftDetailScreen = ({ route }: Props) => {
     } finally {
       setSaving(false);
     }
-  }, [baseUrl, description, draft, price, status, title]);
+  }, [baseUrl, description, draft, price, status, title, uploadKey]);
+
+  const onPostHelper = useCallback(async () => {
+    if (!draft) return;
+    const priceDisplay = price.trim()
+      ? price.trim()
+      : priceValue
+      ? String(priceValue)
+      : "";
+    const helperText = `${title || draft.title}\n\n${description || draft.description || ""}\n\nPrice: ${
+      priceDisplay ? `£${priceDisplay}` : "TBD"
+    }`;
+    await Clipboard.setStringAsync(helperText.trim());
+    const deepLink = "vinted://items/new";
+    const supported = await Linking.canOpenURL(deepLink);
+    if (supported) {
+      await Linking.openURL(deepLink);
+    } else {
+      Alert.alert(
+        "Copied to clipboard",
+        "We copied the listing text. Open the Vinted app, tap the + button, and paste the details into your draft."
+      );
+    }
+  }, [description, draft, price, priceValue, title]);
 
   const body = loading ? (
     <ActivityIndicator style={{ marginTop: 40 }} />
@@ -176,12 +211,36 @@ export const DraftDetailScreen = ({ route }: Props) => {
         </View>
         <View style={[styles.field, styles.flex]}>
           <Text style={styles.label}>Status</Text>
+          <View style={styles.statusRow}>
+            {STATUS_OPTIONS.map((option) => (
+              <TouchableOpacity
+                key={option.value}
+                style={[
+                  styles.statusOption,
+                  status === option.value && styles.statusOptionActive,
+                ]}
+                onPress={() => setStatus(option.value)}
+              >
+                <Text
+                  style={[
+                    styles.statusOptionText,
+                    status === option.value && styles.statusOptionTextActive,
+                  ]}
+                >
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
           <TextInput
             style={styles.input}
             value={status}
             onChangeText={setStatus}
             placeholder="draft"
           />
+          <Text style={styles.helper}>
+            Tap a chip for quick status or type a custom state (e.g. posted).
+          </Text>
         </View>
       </View>
       <View style={styles.field}>
@@ -193,12 +252,26 @@ export const DraftDetailScreen = ({ route }: Props) => {
           Colour: {draft?.colour || "?"} · Condition:{" "}
           {draft?.condition || "Good"}
         </Text>
+        {(draft?.price_low || draft?.price_high) && (
+          <Text style={styles.meta}>
+            Suggested price: £{draft?.price_low ?? "?"} - £
+            {draft?.price_high ?? "?"} (mid £{draft?.price_mid ?? "?"})
+          </Text>
+        )}
       </View>
-      <Button
-        title={saving ? "Saving..." : "Save changes"}
-        onPress={onSave}
-        disabled={saving}
-      />
+      <View style={styles.actions}>
+        <Button
+          title={saving ? "Saving..." : "Save changes"}
+          onPress={onSave}
+          disabled={saving}
+        />
+        <View style={{ height: 12 }} />
+        <Button title="Post to Vinted" onPress={onPostHelper} />
+        <Text style={styles.helper}>
+          Copies the title, description, and price to your clipboard, then opens
+          (or reminds you to open) the Vinted app so you can paste the details.
+        </Text>
+      </View>
     </ScrollView>
   );
 
@@ -275,5 +348,35 @@ const styles = StyleSheet.create({
     color: "#991b1b",
     padding: 12,
     borderRadius: 8,
+  },
+  statusRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  statusOption: {
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+  },
+  statusOptionActive: {
+    backgroundColor: "#111827",
+    borderColor: "#111827",
+  },
+  statusOptionText: {
+    color: "#374151",
+    fontWeight: "600",
+  },
+  statusOptionTextActive: {
+    color: "#fff",
+  },
+  actions: {
+    gap: 8,
+  },
+  helper: {
+    color: "#6b7280",
+    fontSize: 14,
   },
 });

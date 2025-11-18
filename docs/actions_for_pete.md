@@ -66,21 +66,21 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 
 - [x] Connect screen hits `/health` and stores the URL in context (Nov 17).
 - [x] Persist the server URL (and upload key placeholder) to `AsyncStorage` inside `ServerProvider`, hydrating it on launch (Nov 18).
-- [ ] Add an optional Upload Key input on the Connect screen and include it in every API request’s `X-Upload-Key` header (reuse for `/api/drafts` once auth is enforced).
+- [x] Add an optional Upload Key input on the Connect screen and include it in every API request’s `X-Upload-Key` header (2025-11-18 – Connect screen now stores the key and API helper injects `X-Upload-Key`).
 
 ### 3.2 Draft experience
 
 - [x] Create `DraftDetailScreen` that loads a single draft via `GET /api/drafts/{id}`, displays thumbnails + metadata, and surfaces editable fields (title, description, price, status). Placeholder data shown if backend not ready (Nov 18).
 - [x] Wire `DraftDetailScreen` edits to `PUT /api/drafts/{id}` with optimistic UI feedback (stubs until backend ships).
-- [ ] Update `DraftListScreen` to render thumbnails (once API returns URLs), show status chips (Draft/Ready), and add a simple filter/toggle for each list.
+- [x] Update `DraftListScreen` to render thumbnails (once API returns URLs), show status chips (Draft/Ready), and add a simple filter/toggle for each list (2025-11-18 – cards now show thumbnail/brand, chips, and filter toggles).
 
 ### 3.3 Upload + post helper
 
 - [x] Basic Upload screen selects/takes photos and POSTs to `/api/upload` with optional metadata JSON.
 - [ ] Switch the Upload screen to call the new `POST /api/drafts` endpoint (reuse the stored upload key/header) once the backend exposes it.
 - [ ] Replace the raw metadata textarea with simple inputs (brand, size, condition dropdowns) that compose JSON for the backend.
-- [ ] After upload, show a success state that deep-links to the new draft (navigate to `DraftDetailScreen`).
-- [ ] Add a “Post to Vinted” helper button on `DraftDetailScreen`: copy title/description/price to the clipboard and open the Vinted app (or instructions) so Pete can publish quickly.
+- [x] After upload, show a success state that deep-links to the new draft (navigate to `DraftDetailScreen`). (2025-11-18 – Upload screen takes you straight into Draft Detail when the server replies with an `item_id`.)
+- [x] Add a “Post to Vinted” helper button on `DraftDetailScreen`: copy title/description/price to the clipboard and open the Vinted app (or instructions) so Pete can publish quickly. (2025-11-18 – helper copies listing text and opens or guides you to the Vinted app.)
 
 ---
 
