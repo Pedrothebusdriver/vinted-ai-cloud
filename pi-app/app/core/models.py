@@ -54,4 +54,4 @@ class Draft(BaseModel):
     label_text: Optional[str] = None
     price: PriceEstimate = Field(default_factory=PriceEstimate)
     photos: List[DraftPhoto] = Field(default_factory=list)
-    metadata: Dict[str, str] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)

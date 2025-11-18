@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import time
+import sqlite3
 from collections import defaultdict, deque
 from contextlib import suppress
 from datetime import datetime
@@ -29,8 +30,10 @@ from prometheus_client import Counter
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from app import compliance, events
+from app.api.schemas import DraftResponseSchema, DraftSummarySchema, DraftUpdatePayload
 from app.classifier import dominant_colour, item_type_from_name
-from app.core.models import PriceEstimate
+from app.core.ingest import DraftRejected, IngestPaths, IngestService
+from app.core.models import Draft, PriceEstimate
 from app.core.pricing import PricingService
 from app.db import connect, init_db, now
 from app.export import build_listing_pack
@@ -278,6 +281,33 @@ SIZE_PATTERNS = [
     ),
 ]
 
+def detect_brand_size(label_text: str) -> Tuple[Optional[str], str, Optional[str], str]:
+    """Return (brand, brand_conf, size, size_conf)."""
+    brand = None
+    bconf = 'Low'
+    size = None
+    sconf = 'Low'
+
+    nt = _normalize_text(label_text)
+
+    if process:
+        match = process.extractOne(nt, BRANDS, scorer=fuzz.token_set_ratio)
+        if match:
+            name, score = match[0], match[1]
+            if score >= _BRAND_MIN_SCORE_HIGH:
+                brand, bconf = name, 'High'
+            elif score >= _BRAND_MIN_SCORE_MED:
+                brand, bconf = name, 'Medium'
+
+    for rx, fn, conf in SIZE_PATTERNS:
+        m = rx.search(label_text)
+        if m:
+            size = fn(m)
+            sconf = conf
+            break
+
+    return brand, bconf, size, sconf
+
 # ---------- OCR helpers ----------
 def _preprocess_for_ocr(img_path: Path) -> Path:
     """Lightweight label boost: grayscale + autocontrast + threshold."""
@@ -305,6 +335,20 @@ def _load_ingest_meta(item_id: int) -> Dict[str, Any]:
         except Exception as exc:
             log.warning("ingest meta parse failed for item %s: %s", item_id, exc)
     return {}
+
+def _write_ingest_meta(item_id: int, payload: Dict[str, Any]) -> None:
+    meta_path = INGEST_META / f'item-{item_id}.json'
+    meta_path.write_text(json.dumps(payload, indent=2))
+
+def _lookup_learned_label(label_hash: str) -> Optional[Tuple[Optional[str], Optional[str]]]:
+    with connect() as c:
+        row = c.execute(
+            'select brand, size from learned_labels where label_hash=?',
+            (label_hash,),
+        ).fetchone()
+    if row:
+        return row['brand'], row['size']
+    return None
 
 # ---------- Image conversion (DNG/HEIC/RAW -> JPEG) ----------
 def _run_im_cmd(args: List[str]) -> bool:
@@ -484,7 +528,6 @@ ALLOWED_CONDITIONS = [
 ]
 PRICE_MIN_PENCE = int(os.getenv("VINTED_PRICE_MIN_PENCE", "50"))   # £0.50
 PRICE_MAX_PENCE = int(os.getenv("VINTED_PRICE_MAX_PENCE", "50000"))  # £500
-pricing_service = PricingService(COMPS_BASE, PRICE_MIN_PENCE, PRICE_MAX_PENCE)
 
 def _make_listing_title(
     brand: Optional[str],
@@ -503,6 +546,27 @@ def _make_listing_title(
         parts.append(f"Size { _sanitize_attr(size, 12).upper() }")
     title = " ".join([p for p in parts if p]).strip() or "Clothing Item"
     return title[:80]
+
+pricing_service = PricingService(COMPS_BASE, PRICE_MIN_PENCE, PRICE_MAX_PENCE)
+ingest_service = IngestService(
+    ocr=ocr,
+    pricing_service=pricing_service,
+    paths=IngestPaths(
+        converted_root=OUT,
+        thumbs_root=THUMBS,
+        placeholder_thumb=Path('static/no-thumb.png'),
+    ),
+    to_jpeg=to_jpeg,
+    make_thumb=make_thumb,
+    preprocess_for_ocr=_preprocess_for_ocr,
+    detect_brand_size=detect_brand_size,
+    label_hash_fn=_label_hash,
+    dominant_colour=dominant_colour,
+    item_type_from_name=item_type_from_name,
+    make_listing_title=_make_listing_title,
+    learned_lookup=_lookup_learned_label,
+    convert_semaphore=CONVERT_SEM,
+)
 
 def _sanitize_attr(value: str, max_len: int = 60) -> str:
     v = (value or "").strip()
@@ -539,6 +603,11 @@ def _gbp_to_pence(value: Optional[float]) -> Optional[int]:
     if value is None:
         return None
     return int(round(value * 100))
+
+def _pence_to_gbp(value: Optional[int]) -> Optional[float]:
+    if value is None:
+        return None
+    return round(value / 100.0, 2)
 
 def _cleanup_temp_files(*paths: Optional[Path]) -> None:
     for p in paths:
@@ -695,171 +764,137 @@ async def _reject_item(item_id: int, reasons: List[str]) -> None:
     for folder in (INP / f'item-{item_id}', OUT / f'item-{item_id}', BAK / f'item-{item_id}'):
         shutil.rmtree(folder, ignore_errors=True)
 
-def detect_brand_size(label_text: str) -> Tuple[Optional[str], str, Optional[str], str]:
-    """Return (brand, brand_conf, size, size_conf)."""
-    brand = None; bconf = 'Low'
-    size = None; sconf = 'Low'
-
-    nt = _normalize_text(label_text)
-
-    # brand via RapidFuzz
-    if process:
-        match = process.extractOne(nt, BRANDS, scorer=fuzz.token_set_ratio)
-        if match:
-            name, score = match[0], match[1]
-            if score >= _BRAND_MIN_SCORE_HIGH:
-                brand, bconf = name, 'High'
-            elif score >= _BRAND_MIN_SCORE_MED:
-                brand, bconf = name, 'Medium'
-
-    # size via regex patterns
-    for rx, fn, conf in SIZE_PATTERNS:
-        m = rx.search(label_text)
-        if m:
-            size = fn(m)
-            sconf = conf
-            break
-
-    return brand, bconf, size, sconf
-
-# ---------- Background job to process one item ----------
-async def _process_item(item_id: int, filepaths: List[Path]) -> None:
-    start = time.time()
-    out_dir  = OUT / f'item-{item_id}'
-    out_dir.mkdir(parents=True, exist_ok=True)
-    paths: List[Tuple[Path, Path]] = []
-    meta = _load_ingest_meta(item_id)
-    meta_vinted = meta.get('vinted') or {}
-
-    async with CONVERT_SEM:  # serialize heavy work on Pi 3B+
-        for src in filepaths:
-            out_path = out_dir / Path(src.name).with_suffix('.jpg').name
-            ok = await asyncio.to_thread(to_jpeg, src, out_path)
-            if ok:
-                await asyncio.to_thread(make_thumb, out_path, THUMBS / f'{out_path.stem}.jpg')
-                paths.append((src, out_path))
-            else:
-                ph = Path('static/no-thumb.png')
-                if ph.exists():
-                    shutil.copyfile(ph, THUMBS / f'{out_path.stem}.jpg')
-
-    allowed_paths: List[Tuple[Path, Path]] = []
-    rejected_reasons: List[str] = []
-    for orig, opt in paths:
-        ok, reason = compliance.check_image(opt)
-        if ok:
-            allowed_paths.append((orig, opt))
-        else:
-            rejected_reasons.append(f"{opt.name}: {reason}")
-            with suppress(FileNotFoundError):
-                opt.unlink()
-            with suppress(FileNotFoundError):
-                (THUMBS / f'{opt.stem}.jpg').unlink()
-
-    if not allowed_paths:
-        await _reject_item(item_id, rejected_reasons or ["non_compliant"])
-        return
-
-    paths = allowed_paths
-
-    # OCR on optimised JPEGs
-    best_score, best_text = -1, ''
-    for (_orig, opt) in paths:
-        prep = _preprocess_for_ocr(opt)
-        t = ocr.read_text(prep)
-        score = sum(ch.isalnum() for ch in t)
-        if score > best_score:
-            best_score, best_text = score, t
-
-    # learning lookup
-    brand = size = None
-    bconf = sconf = 'Low'
-    lhash = _label_hash(best_text) if best_text else None
+def _create_item(status: str = "draft") -> int:
     with connect() as c:
-        if lhash:
-            row = c.execute('select brand, size from learned_labels where label_hash=?', (lhash,)).fetchone()
-            if row:
-                brand, size = row['brand'], row['size']
-                bconf = sconf = 'High'
+        c.execute('insert into items(status,created_at,updated_at) values(?,?,?)', (status, now(), now()))
+        item_id = c.execute('select last_insert_rowid()').fetchone()[0]
+        c.commit()
+    return int(item_id)
 
-    # if not learned, run detectors
-    if not brand or not size:
-        dbrand, dbconf, dsize, dsconf = detect_brand_size(best_text)
-        if not brand and dbrand:
-            brand, bconf = dbrand, dbconf
-        if not size and dsize:
-            size, sconf = dsize, dsconf
+async def _save_upload_files(item_id: int, files: List[UploadFile]) -> List[Path]:
+    item_dir = INP / f'item-{item_id}'
+    bak_dir  = BAK / f'item-{item_id}'
+    for p in (item_dir, bak_dir):
+        p.mkdir(parents=True, exist_ok=True)
+    saved: List[Path] = []
+    for f in files:
+        dest = item_dir / f.filename
+        with open(dest, 'wb') as w:
+            while True:
+                chunk = await f.read(1024*1024)
+                if not chunk:
+                    break
+                w.write(chunk)
+        shutil.copyfile(dest, bak_dir / f.filename)
+        saved.append(dest)
+    return saved
 
-    # Metadata fallback (e.g. curated Vinted samples)
-    meta_brand = (meta.get('brand') or meta_vinted.get('brand') or '').strip()
-    meta_size = (meta.get('size') or meta_vinted.get('size') or '').strip()
-    if (not brand or not brand.strip()) and meta_brand:
-        brand, bconf = meta_brand, 'Meta'
-    if (not size or not size.strip()) and meta_size:
-        size, sconf = meta_size, 'Meta'
-    if (not brand or not brand.strip()) or (not size or not size.strip()):
-        slug_sources = [
-            meta_vinted.get('title'),
-            meta_vinted.get('id'),
-            meta.get('title'),
-            meta.get('term'),
+async def _store_ingest_result(item_id: int, draft: Draft, *, started_at: float) -> None:
+    brand_conf = draft.metadata.get("brand_confidence", "Auto")
+    size_conf = draft.metadata.get("size_confidence", "Auto")
+    item_conf = draft.metadata.get("item_confidence", "Auto")
+    label_text = draft.label_text or ""
+    colour = draft.colour or "Unknown"
+    item_type = draft.metadata.get("item_type") or (draft.category_name or "clothing")
+
+    price_low = _gbp_to_pence(draft.price.low)
+    price_mid = _gbp_to_pence(draft.price.mid)
+    price_high = _gbp_to_pence(draft.price.high)
+    with connect() as c:
+        ts = now()
+        c.execute(
+            'insert or ignore into drafts(item_id, created_at, updated_at, status) values (?,?,?,?)',
+            (item_id, ts, ts, draft.status or "draft"),
+        )
+        c.execute('update items set status=?, updated_at=? where id=?', (draft.status or "draft", ts, item_id))
+        for idx, photo in enumerate(draft.photos):
+            c.execute(
+                'insert into photos(item_id, original_path, optimised_path, width, height, is_label, draft_id, file_path, position) values (?,?,?,?,?,?,?,?,?)',
+                (
+                    item_id,
+                    photo.original_path or "",
+                    photo.optimised_path or photo.path,
+                    0,
+                    0,
+                    0,
+                    item_id,
+                    photo.optimised_path or photo.path or "",
+                    idx,
+                ),
+            )
+        c.execute(
+            '''
+            update drafts
+            set title=?,
+                description=?,
+                brand=?,
+                size=?,
+                colour=?,
+                category_id=?,
+                category_name=?,
+                condition=?,
+                status=?,
+                price_low_pence=?,
+                price_mid_pence=?,
+                price_high_pence=?,
+                updated_at=?
+            where item_id=?
+            ''',
+            (
+                draft.title or "",
+                draft.description or "",
+                draft.brand or "",
+                draft.size or "",
+                draft.colour or "",
+                draft.category_id,
+                draft.category_name,
+                draft.condition or "Good",
+                draft.status or "draft",
+                price_low,
+                price_mid,
+                price_high,
+                ts,
+                item_id,
+            ),
+        )
+        attr_rows = [
+            ("brand", draft.brand or "", brand_conf),
+            ("size", draft.size or "", size_conf),
+            ("item_type", item_type, item_conf),
+            ("colour", colour, "Medium"),
+            ("condition", draft.condition or "Good", "Auto"),
+            ("label_text", label_text, "Auto"),
         ]
-        if filepaths:
-            slug_sources.append(Path(filepaths[0]).stem)
-        for source in slug_sources:
-            if not source:
-                continue
-            cleaned = source.replace('-', ' ')
-            dbrand, dbconf, dsize, dsconf = detect_brand_size(cleaned)
-            if (not brand or not brand.strip()) and dbrand:
-                brand = dbrand
-                bconf = f'MetaSlug/{dbconf}'
-            if (not size or not size.strip()) and dsize:
-                size = dsize
-                sconf = f'MetaSlug/{dsconf}'
-            if brand and size:
-                break
-
-    # Heuristics for type/colour
-    first_name = filepaths[0].name if filepaths else 'clothing'
-    item_type, iconf = item_type_from_name(first_name)
-    if (not item_type or item_type == 'clothing') and (meta_vinted.get('title') or meta.get('title')):
-        mt = meta_vinted.get('title') or meta.get('title')
-        derived, derived_conf = item_type_from_name(mt)
-        if derived:
-            item_type, iconf = derived, 'MetaTitle'
-    colour = dominant_colour(paths[0][1]) if paths else 'Unknown'
-
-    draft_title = _make_listing_title(brand, item_type, colour, size)
-
-    # Save to DB (also stash label_text for learning on save)
-    with connect() as c:
-        for orig, opt in paths:
-            c.execute('insert into photos(item_id, original_path, optimised_path, width, height, is_label) values (?,?,?,?,?,0)',
-                      (item_id, str(orig), str(opt), 0, 0))
-        c.execute('insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)', (item_id,'brand', brand or '', bconf))
-        c.execute('insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)', (item_id,'size', size or '', sconf))
-        c.execute('insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)', (item_id,'item_type', item_type, iconf))
-        c.execute('insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)', (item_id,'colour', colour, 'Medium'))
-        c.execute('insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)', (item_id,'condition', 'Good', 'Auto'))
-        c.execute('insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)', (item_id,'label_text', best_text or '', 'Auto'))
-        existing = c.execute('select title from drafts where item_id=?', (item_id,)).fetchone()
-        if existing:
-            if not (existing['title'] or '').strip():
-                c.execute('update drafts set title=? where item_id=?', (draft_title, item_id))
-        else:
-            c.execute('insert into drafts(item_id, title, price_pence) values (?,?,?)', (item_id, draft_title, None))
+        if draft.category_id:
+            attr_rows.append(("category_id", draft.category_id, "Auto"))
+        if draft.category_name:
+            attr_rows.append(("category_name", draft.category_name, "Auto"))
+        for field, value, confidence in attr_rows:
+                c.execute(
+                    'insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)',
+                    (item_id, field, value or "", confidence),
+                )
+        rec = _gbp_to_pence(draft.price.mid)
+        if draft.price.has_prices and rec is not None:
+            p25 = _gbp_to_pence(draft.price.low)
+            p75 = _gbp_to_pence(draft.price.high)
+            c.execute(
+                'insert or replace into prices(item_id, recommended_pence, p25_pence, p75_pence, checked_at) values (?,?,?,?,?)',
+                (item_id, rec, p25, p75, now()),
+            )
         c.commit()
 
-    # Discord ping with thumbnail preview
     if WEBHOOK_DRAFTS:
         try:
-            thumb_path = THUMBS / f'{Path(paths[0][1]).stem}.jpg' if paths else None
+            first_photo = draft.photos[0] if draft.photos else None
+            thumb_path = None
+            if first_photo:
+                thumb_path = THUMBS / f"{Path((first_photo.optimised_path or first_photo.path)).stem}.jpg"
             pieces = [
-                f"Brand: {brand or '—'} ({bconf})",
-                f"Size: {size or '—'} ({sconf})",
+                f"Brand: {draft.brand or '—'} ({brand_conf})",
+                f"Size: {draft.size or '—'} ({size_conf})",
                 f"Colour: {colour}",
-                f"Item: {item_type} ({iconf})",
+                f"Item: {item_type} ({item_conf})",
             ]
             draft_url = f"{PUBLIC_BASE_URL}/draft/{item_id}"
             content = f"🧵 Draft #{item_id}\n" + "\n".join(pieces) + f"\n{draft_url}"
@@ -870,21 +905,123 @@ async def _process_item(item_id: int, filepaths: List[Path]) -> None:
                 await cli.post(
                     WEBHOOK_DRAFTS,
                     data={"content": content[:1900]},
-                    files=files
+                    files=files,
                 )
         except Exception as e:
             log.warning("draft_webhook_failed", error=str(e))
 
-    log.info("item_processed", item_id=item_id, seconds=round(time.time()-start, 2))
+    duration = round(time.time() - started_at, 2)
+    log.info("item_processed", item_id=item_id, seconds=duration)
     ITEMS_PROCESSED.labels(status="ok").inc()
     events.record_event("item_processed", {
         "item_id": item_id,
-        "brand": brand,
-        "size": size,
+        "brand": draft.brand,
+        "size": draft.size,
         "item_type": item_type,
         "colour": colour,
-        "seconds": round(time.time()-start, 2),
+        "seconds": duration,
     })
+
+
+def _fetch_photos(conn, draft_id: int, limit: Optional[int] = None) -> List[sqlite3.Row]:
+    sql = (
+        "select id, original_path, optimised_path, file_path, position "
+        "from photos where coalesce(draft_id, item_id)=? "
+        "order by position asc, id asc"
+    )
+    params: List[Any] = [draft_id]
+    if limit:
+        sql += " limit ?"
+        params.append(limit)
+    return conn.execute(sql, params).fetchall()
+
+
+def _photo_thumbnail(path_value: Optional[str]) -> Optional[str]:
+    if not path_value:
+        return None
+    path = Path(path_value)
+    return f"/static/thumbs/{path.stem}.jpg"
+
+
+def _serialize_photo_row(row: sqlite3.Row) -> Dict[str, Any]:
+    file_path = row["file_path"] or row["optimised_path"] or row["original_path"]
+    thumb = _photo_thumbnail(row["optimised_path"])
+    return {
+        "id": row["id"],
+        "original_path": row["original_path"],
+        "optimised_path": row["optimised_path"],
+        "file_path": file_path,
+        "url": thumb or file_path,
+        "position": row["position"],
+    }
+
+
+def _serialize_draft_row(row: sqlite3.Row, photos: List[sqlite3.Row], include_photos: bool = True) -> Dict[str, Any]:
+    photo_payloads = [_serialize_photo_row(photo) for photo in photos]
+    price_low = _pence_to_gbp(row["price_low_pence"])
+    price_mid = _pence_to_gbp(row["price_mid_pence"]) or _pence_to_gbp(row["price_pence"])
+    price_high = _pence_to_gbp(row["price_high_pence"])
+    selected_price = _pence_to_gbp(row["selected_price_pence"] or row["price_pence"])
+    payload = {
+        "id": row["item_id"],
+        "title": row["title"] or f"Draft #{row['item_id']}",
+        "description": row["description"],
+        "status": row["status"] or "draft",
+        "brand": row["brand"],
+        "size": row["size"],
+        "colour": row["colour"],
+        "category_id": row["category_id"],
+        "category_name": row["category_name"],
+        "condition": row["condition"],
+        "price_low": price_low,
+        "price_mid": price_mid,
+        "price_high": price_high,
+        "selected_price": selected_price,
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "thumbnail_url": photo_payloads[0]["url"] if photo_payloads else None,
+        "photos": photo_payloads if include_photos else [],
+    }
+    payload["prices"] = {
+        "low": price_low,
+        "mid": price_mid,
+        "high": price_high,
+        "selected": selected_price,
+    }
+    payload["attributes"] = {
+        "brand": {"value": row["brand"]},
+        "size": {"value": row["size"]},
+        "colour": {"value": row["colour"]},
+        "status": {"value": row["status"] or "draft"},
+        "updated_at": payload["updated_at"],
+    }
+    return payload
+
+
+def _load_draft_payload(draft_id: int, *, include_photos: bool = True) -> Optional[Dict[str, Any]]:
+    with connect() as c:
+        row = c.execute('select * from drafts where item_id=?', (draft_id,)).fetchone()
+        if not row:
+            return None
+        photos = _fetch_photos(c, draft_id, None if include_photos else 1)
+        return _serialize_draft_row(row, photos, include_photos)
+
+
+# ---------- Background job to process one item ----------
+async def _process_item(item_id: int, filepaths: List[Path]) -> None:
+    start = time.time()
+    meta = _load_ingest_meta(item_id)
+    try:
+        draft = await ingest_service.build_draft(
+            item_id=item_id,
+            filepaths=filepaths,
+            metadata=meta,
+        )
+    except DraftRejected as exc:
+        await _reject_item(item_id, list(exc.reasons))
+        return
+
+    await _store_ingest_result(item_id, draft, started_at=start)
 
 # ---------- Routes ----------
 @app.get('/health')
@@ -1004,25 +1141,64 @@ def view_draft(item_id: int, request: Request):
     }
     return tmpl.TemplateResponse('draft.html', {'request': request, 'd': d})
 
-@app.get('/api/drafts')
-def list_drafts():
+@app.get('/api/drafts', response_model=List[DraftSummarySchema])
+def list_drafts(status: Optional[str] = None):
     with connect() as c:
-        items = c.execute('select id from items order by id desc').fetchall()
-    resp = []
-    for it in items:
-        iid = it['id']
-        with connect() as c:
-            attrs = {r['field']: {'value': r['value'], 'confidence': r['confidence']}
-                     for r in c.execute('select * from attributes where item_id=?', (iid,))}
-            draft = c.execute('select * from drafts where item_id=?', (iid,)).fetchone()
-            photos = c.execute('select * from photos where item_id=?', (iid,)).fetchall()
-        resp.append({
-            'id': iid,
-            'title': draft['title'] if draft else '',
-            **attrs,
-            'thumbs': [f'/static/thumbs/{Path(p["optimised_path"]).stem}.jpg' for p in photos]
-        })
-    return resp
+        query = 'select * from drafts'
+        params: List[Any] = []
+        if status:
+            query += ' where status=?'
+            params.append(status)
+        query += ' order by coalesce(updated_at, created_at, 0) desc, item_id desc'
+        rows = c.execute(query, params).fetchall()
+        payloads = []
+        for row in rows:
+            photos = _fetch_photos(c, row['item_id'], limit=1)
+            payloads.append(_serialize_draft_row(row, photos, include_photos=False))
+    return payloads
+
+@app.get('/api/drafts/{draft_id}', response_model=DraftResponseSchema)
+def get_draft_detail(draft_id: int):
+    payload = _load_draft_payload(draft_id, include_photos=True)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    return payload
+
+@app.put('/api/drafts/{draft_id}', response_model=DraftResponseSchema)
+async def update_draft_api(draft_id: int, payload: DraftUpdatePayload):
+    updates: Dict[str, Any] = {}
+    if payload.title is not None:
+        updates["title"] = _sanitize_attr(payload.title, 80)
+    if payload.description is not None:
+        updates["description"] = _sanitize_attr(payload.description, 400)
+    if payload.status is not None:
+        updates["status"] = payload.status.strip()
+    if payload.category_id is not None:
+        updates["category_id"] = payload.category_id.strip()
+    if payload.category_name is not None:
+        updates["category_name"] = payload.category_name.strip()
+    price_value = payload.selected_price
+    if price_value is None:
+        price_value = payload.price
+    if price_value is not None:
+        updates["selected_price_pence"] = _gbp_to_pence(price_value)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update.")
+    updates["updated_at"] = now()
+    set_clause = ", ".join(f"{field}=?" for field in updates)
+    params = list(updates.values()) + [draft_id]
+    with connect() as c:
+        row = c.execute('select 1 from drafts where item_id=?', (draft_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Draft not found")
+        c.execute(f'update drafts set {set_clause} where item_id=?', params)
+        if "status" in updates:
+            c.execute('update items set status=?, updated_at=? where id=?', (updates["status"], updates["updated_at"], draft_id))
+        c.commit()
+    payload = _load_draft_payload(draft_id, include_photos=True)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    return payload
 
 @app.post('/api/infer')
 async def infer_image(request: Request, file: UploadFile = File(...)):
@@ -1101,38 +1277,50 @@ async def upload(request: Request,
         except json.JSONDecodeError:
             log.warning("discarding malformed metadata payload for upload: %s", metadata[:200])
 
-    # Create item
-    with connect() as c:
-        c.execute('insert into items(status,created_at,updated_at) values(?,?,?)', ('draft', now(), now()))
-        item_id = c.execute('select last_insert_rowid()').fetchone()[0]
-        c.commit()
-
-    # Folders
-    item_dir = INP / f'item-{item_id}'
-    bak_dir  = BAK / f'item-{item_id}'
-    for p in (item_dir, bak_dir):
-        p.mkdir(parents=True, exist_ok=True)
-
-    # Save originals (stream to avoid big RAM spikes)
-    saved: List[Path] = []
-    for f in files:
-        dest = item_dir / f.filename
-        with open(dest, 'wb') as w:
-            while True:
-                chunk = await f.read(1024*1024)
-                if not chunk:
-                    break
-                w.write(chunk)
-        shutil.copyfile(dest, bak_dir / f.filename)
-        saved.append(dest)
-
+    item_id = _create_item()
+    saved = await _save_upload_files(item_id, files)
     if meta_payload:
-        meta_path = INGEST_META / f'item-{item_id}.json'
-        meta_path.write_text(json.dumps(meta_payload, indent=2))
+        _write_ingest_meta(item_id, meta_payload)
 
     # Kick off background processing and return immediately
     background_tasks.add_task(_process_item, item_id, saved)
     return {"queued": True, "item_id": item_id}
+
+@app.post('/api/drafts', response_model=DraftResponseSchema, status_code=201)
+async def create_draft(
+    request: Request,
+    files: List[UploadFile] = File(...),
+    metadata: Optional[str] = Form(None),
+):
+    _require_upload_auth(request)
+    _enforce_upload_rate_limit(request)
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one image is required.")
+    meta_payload: Optional[Dict[str, Any]] = None
+    if metadata:
+        try:
+            meta_payload = json.loads(metadata)
+        except json.JSONDecodeError:
+            log.warning("discarding malformed metadata payload for draft upload: %s", metadata[:200])
+    item_id = _create_item()
+    saved = await _save_upload_files(item_id, files)
+    if meta_payload:
+        _write_ingest_meta(item_id, meta_payload)
+    start = time.time()
+    try:
+        draft = await ingest_service.build_draft(
+            item_id=item_id,
+            filepaths=saved,
+            metadata=meta_payload,
+        )
+    except DraftRejected as exc:
+        await _reject_item(item_id, list(exc.reasons))
+        raise HTTPException(status_code=422, detail={"reasons": exc.reasons})
+    await _store_ingest_result(item_id, draft, started_at=start)
+    payload = _load_draft_payload(item_id, include_photos=True)
+    if not payload:
+        raise HTTPException(status_code=500, detail="Unable to load stored draft.")
+    return payload
 
 @app.post('/api/draft/{item_id}/save')
 async def save_draft(item_id: int, title: str = Form(''), brand: str = Form(''), size: str = Form(''),

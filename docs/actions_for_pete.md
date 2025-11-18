@@ -31,16 +31,16 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [x] Check in `data/vinted_categories.json` (plus a short note or fetch helper) containing the category tree we’ll use for suggestions.
 - [x] Implement `pi-app/app/core/category_suggester.py` with `suggest_categories(hint_text, ocr_text, filename)` that loads the JSON once, uses keywords + RapidFuzz, and returns the top ranked categories (write pytest coverage).
 - [x] Implement `pi-app/app/core/pricing.py` that wraps the current COMPS helper, clamps prices between the env min/max, caches results by `(brand, category_id, size, condition)`, and exposes `suggest_price(...) -> {low, mid, high}`.
-- [ ] Extract `_process_item` logic into `pi-app/app/core/ingest.py`: convert + optimise photos, run compliance + OCR, fill brand/size/colour/type, call category/pricing helpers, and return a `Draft` model with ordered `DraftPhoto`s.
-- [ ] Update `/api/upload` to become a thin shim that calls `core.ingest.build_draft(...)` so new endpoints can reuse the same code path while the legacy Shortcut keeps working.
+- [x] Extract `_process_item` logic into `pi-app/app/core/ingest.py`: convert + optimise photos, run compliance + OCR, fill brand/size/colour/type, call category/pricing helpers, and return a `Draft` model with ordered `DraftPhoto`s.
+- [x] Update `/api/upload` to become a thin shim that calls `core.ingest.build_draft(...)` so new endpoints can reuse the same code path while the legacy Shortcut keeps working.
 
 ### 2.2 Draft API surface
 
-- [ ] Add request/response schemas (e.g., `pi-app/app/api/schemas.py`) for the draft endpoints so FastAPI returns the same structure everywhere.
-- [ ] Implement `POST /api/drafts` (multipart images + optional JSON metadata) that calls `core.ingest`, saves rows via the new schema, honors upload auth/rate limits, and returns the newly created `Draft`.
-- [ ] Implement `GET /api/drafts/{draft_id}` returning full draft metadata (photos, attributes, price ranges, compliance flags) pulled from SQLite.
-- [ ] Implement `PUT /api/drafts/{draft_id}` allowing the mobile app to update title, description, category_id, status, and `selected_price`, updating `updated_at`.
-- [ ] Expand `GET /api/drafts` to read from the new `drafts` table, include thumbnails + status + price ranges, and accept `?status=` filters for mobile (drop the legacy `attributes` blob once the new response ships).
+- [x] Add request/response schemas (e.g., `pi-app/app/api/schemas.py`) for the draft endpoints so FastAPI returns the same structure everywhere.
+- [x] Implement `POST /api/drafts` (multipart images + optional JSON metadata) that calls `core.ingest`, saves rows via the new schema, honors upload auth/rate limits, and returns the newly created `Draft`.
+- [x] Implement `GET /api/drafts/{draft_id}` returning full draft metadata (photos, attributes, price ranges, compliance flags) pulled from SQLite.
+- [x] Implement `PUT /api/drafts/{draft_id}` allowing the mobile app to update title, description, category_id, status, and `selected_price`, updating `updated_at`.
+- [x] Expand `GET /api/drafts` to read from the new `drafts` table, include thumbnails + status + price ranges, and accept `?status=` filters for mobile (drop the legacy `attributes` blob once the new response ships).
 - [ ] Expose `POST /api/price` (or upgrade the existing helper) to call `core.pricing.suggest_price` so Pi UI + mobile can re-run pricing on demand.
 
 ### 2.3 Database + Pi UI alignment
