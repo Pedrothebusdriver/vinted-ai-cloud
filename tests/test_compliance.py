@@ -1,12 +1,14 @@
-import sys
 from pathlib import Path
+import sys
 
 import cv2
 import numpy as np
 import pytest
 
+# Make sure we import from the Pi app package (pi-app/app),
+# NOT the top-level app.py in the repo.
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.append(str(ROOT / "pi-app"))
+sys.path.insert(0, str(ROOT / "pi-app"))
 
 from app import compliance  # noqa: E402
 

@@ -12,6 +12,7 @@ MAX_FILE_BYTES = int(os.getenv("COMPLIANCE_MAX_FILE_BYTES", str(15 * 1024 * 1024
 MAX_FACE_RATIO = float(os.getenv("COMPLIANCE_MAX_FACE_RATIO", "0.45"))
 MAX_BODY_RATIO = float(os.getenv("COMPLIANCE_MAX_BODY_RATIO", "0.35"))
 BLUR_THRESHOLD = float(os.getenv("COMPLIANCE_MIN_LAPLACE", "35"))
+EDGE_ENERGY_THRESHOLD = float(os.getenv("COMPLIANCE_MIN_EDGE_ENERGY", "1.5"))
 BODY_CONFIDENCE = float(os.getenv("COMPLIANCE_BODY_CONFIDENCE", "0.3"))
 
 _CASCADE_PATH = getattr(cv2.data, "haarcascades", "")
@@ -82,8 +83,26 @@ def _variance_of_laplacian(image) -> float:
     return cv2.Laplacian(gray, cv2.CV_64F).var()
 
 
+def _mean_gradient_magnitude(image) -> float:
+    """
+    Measure first-order edge energy to handle crisp, directional gradients that
+    have a low Laplacian response.
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+    magnitude = cv2.magnitude(grad_x, grad_y)
+    return float(magnitude.mean())
+
+
 def _is_blurry(image) -> bool:
-    return _variance_of_laplacian(image) < BLUR_THRESHOLD
+    laplace_variance = _variance_of_laplacian(image)
+    if laplace_variance >= BLUR_THRESHOLD:
+        return False
+    # When Laplacian variance is below the threshold, fall back to a Sobel-based
+    # edge check so synthetic gradients are not incorrectly rejected.
+    edge_energy = _mean_gradient_magnitude(image)
+    return edge_energy < EDGE_ENERGY_THRESHOLD
 
 
 def check_image(image_path: Path) -> Tuple[bool, str]:
