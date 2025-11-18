@@ -1,0 +1,27 @@
+[
+  {
+    "id": "mens_hoodies",
+    "name": "Men > Hoodies & Sweatshirts",
+    "keywords": ["hoodie", "sweatshirt", "fleece", "pullover"]
+  },
+  {
+    "id": "mens_jeans",
+    "name": "Men > Jeans",
+    "keywords": ["jeans", "denim", "501", "skinny"]
+  },
+  {
+    "id": "mens_jackets",
+    "name": "Men > Jackets & Coats",
+    "keywords": ["jacket", "coat", "parka", "windbreaker"]
+  },
+  {
+    "id": "womens_dresses",
+    "name": "Women > Dresses",
+    "keywords": ["dress", "midi", "maxi", "evening"]
+  },
+  {
+    "id": "sneakers",
+    "name": "Footwear > Trainers",
+    "keywords": ["trainer", "sneaker", "shoes", "air force"]
+  }
+]

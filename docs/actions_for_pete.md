@@ -27,10 +27,10 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 
 ### 2.1 Core module extraction
 
-- [ ] Create `pi-app/app/core/models.py` (Pydantic or dataclasses) for `Draft`, `DraftPhoto`, `PriceEstimate`, and `CategorySuggestion` so ingest + API code share typed payloads.
-- [ ] Check in `data/vinted_categories.json` (plus a short note or fetch helper) containing the category tree we’ll use for suggestions.
-- [ ] Implement `pi-app/app/core/category_suggester.py` with `suggest_categories(hint_text, ocr_text, filename)` that loads the JSON once, uses keywords + RapidFuzz, and returns the top ranked categories (write pytest coverage).
-- [ ] Implement `pi-app/app/core/pricing.py` that wraps the current COMPS helper, clamps prices between the env min/max, caches results by `(brand, category_id, size, condition)`, and exposes `suggest_price(...) -> {low, mid, high}`.
+- [x] Create `pi-app/app/core/models.py` (Pydantic or dataclasses) for `Draft`, `DraftPhoto`, `PriceEstimate`, and `CategorySuggestion` so ingest + API code share typed payloads.
+- [x] Check in `data/vinted_categories.json` (plus a short note or fetch helper) containing the category tree we’ll use for suggestions.
+- [x] Implement `pi-app/app/core/category_suggester.py` with `suggest_categories(hint_text, ocr_text, filename)` that loads the JSON once, uses keywords + RapidFuzz, and returns the top ranked categories (write pytest coverage).
+- [x] Implement `pi-app/app/core/pricing.py` that wraps the current COMPS helper, clamps prices between the env min/max, caches results by `(brand, category_id, size, condition)`, and exposes `suggest_price(...) -> {low, mid, high}`.
 - [ ] Extract `_process_item` logic into `pi-app/app/core/ingest.py`: convert + optimise photos, run compliance + OCR, fill brand/size/colour/type, call category/pricing helpers, and return a `Draft` model with ordered `DraftPhoto`s.
 - [ ] Update `/api/upload` to become a thin shim that calls `core.ingest.build_draft(...)` so new endpoints can reuse the same code path while the legacy Shortcut keeps working.
 

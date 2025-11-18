@@ -30,6 +30,8 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from app import compliance, events
 from app.classifier import dominant_colour, item_type_from_name
+from app.core.models import PriceEstimate
+from app.core.pricing import PricingService
 from app.db import connect, init_db, now
 from app.export import build_listing_pack
 from app.ocr import OCR
@@ -64,6 +66,27 @@ ITEMS_PROCESSED.labels(status="rejected")
 
 # ---------- Env / paths ----------
 load_dotenv()
+
+
+def _detect_version() -> str:
+    env_version = os.getenv("APP_VERSION")
+    if env_version:
+        return env_version
+    try:
+        repo_root = Path(__file__).resolve().parents[2]
+    except Exception:
+        repo_root = Path(".").resolve()
+    try:
+        return (
+            subprocess.check_output(
+                ["git", "-C", str(repo_root), "rev-parse", "--short", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode("utf-8")
+            .strip()
+        )
+    except Exception:
+        return "dev"
 WEBHOOK = os.getenv('DISCORD_WEBHOOK_URL', '')
 WEBHOOK_GENERAL = os.getenv('DISCORD_WEBHOOK_GENERAL', WEBHOOK)
 WEBHOOK_DRAFTS = os.getenv('DISCORD_WEBHOOK_DRAFTS', WEBHOOK)
@@ -99,6 +122,8 @@ for p in (INP, OUT, BAK, THUMBS, VAR_DIR, INFER_TMP, SAMPLES, EVALS, INGEST_META
 
 # Limit heavy conversions on small Pi
 CONVERT_SEM = asyncio.Semaphore(1)
+APP_VERSION = _detect_version()
+STARTED_AT = time.time()
 
 # ---------- FastAPI ----------
 app = FastAPI()
@@ -459,6 +484,7 @@ ALLOWED_CONDITIONS = [
 ]
 PRICE_MIN_PENCE = int(os.getenv("VINTED_PRICE_MIN_PENCE", "50"))   # £0.50
 PRICE_MAX_PENCE = int(os.getenv("VINTED_PRICE_MAX_PENCE", "50000"))  # £500
+pricing_service = PricingService(COMPS_BASE, PRICE_MIN_PENCE, PRICE_MAX_PENCE)
 
 def _make_listing_title(
     brand: Optional[str],
@@ -509,19 +535,10 @@ def _clamp_price(pence: Optional[int]) -> Optional[int]:
         return None
     return max(PRICE_MIN_PENCE, min(PRICE_MAX_PENCE, pence))
 
-async def _fetch_price_data(params: Dict[str, str]) -> Optional[Dict[str, Any]]:
-    if not COMPS_BASE:
+def _gbp_to_pence(value: Optional[float]) -> Optional[int]:
+    if value is None:
         return None
-    base = COMPS_BASE.rstrip("/")
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as cli:
-            for path in ("/api/price", "/price"):
-                r = await cli.get(base + path, params=params)
-                if r.status_code == 200:
-                    return r.json()
-    except Exception as e:
-        log.warning("Pricing fetch failed: %s", e)
-    return None
+    return int(round(value * 100))
 
 def _cleanup_temp_files(*paths: Optional[Path]) -> None:
     for p in paths:
@@ -872,7 +889,11 @@ async def _process_item(item_id: int, filepaths: List[Path]) -> None:
 # ---------- Routes ----------
 @app.get('/health')
 def health():
-    return {"ok": True}
+    return {
+        "status": "ok",
+        "version": APP_VERSION,
+        "uptime_seconds": round(time.time() - STARTED_AT, 2),
+    }
 
 @app.get('/', response_class=HTMLResponse)
 def home(request: Request):
@@ -1035,14 +1056,6 @@ async def infer_image(request: Request, file: UploadFile = File(...)):
     colour = await asyncio.to_thread(dominant_colour, jpeg_path)
     item_type, iconf = item_type_from_name(name_hint)
 
-    params = {
-        'brand': brand or '',
-        'item_type': item_type or '',
-        'size': size or '',
-        'colour': colour or '',
-    }
-    price_blob = await _fetch_price_data(params) if any(params.values()) else None
-
     tags = [t for t in (brand, size, colour, item_type) if t]
     response: Dict[str, Any] = {
         "category": item_type,
@@ -1055,13 +1068,21 @@ async def infer_image(request: Request, file: UploadFile = File(...)):
         "source": "pi-local",
         "fast_mode": fast_mode,
     }
-    if price_blob:
-        response["price"] = {
-            "value": price_blob.get("median_price_gbp"),
-            "p25": price_blob.get("p25_gbp"),
-            "p75": price_blob.get("p75_gbp"),
-        }
-        response["examples"] = price_blob.get("examples", [])[:5]
+    if any((brand, item_type, size, colour)):
+        price_estimate = await pricing_service.suggest_price(
+            brand=brand,
+            category=item_type,
+            size=size,
+            colour=colour,
+            condition="Good",
+        )
+    else:
+        price_estimate = PriceEstimate()
+
+    if price_estimate.has_prices:
+        response["price"] = price_estimate.as_response()
+    if price_estimate.examples:
+        response["examples"] = price_estimate.examples
 
     _cleanup_temp_files(raw_path, jpeg_path)
     return response
@@ -1166,16 +1187,17 @@ async def check_price(item_id: int):
         'size': attrs.get('size',''),
         'colour': attrs.get('colour','')
     }
-    rec = None; p25=None; p75=None; examples=[]
-    data = await _fetch_price_data(params)
-    if data:
-        try:
-            rec = int(float(data.get('median_price_gbp', 0))*100) if data.get('median_price_gbp') else None
-            p25 = int(float(data.get('p25_gbp', 0))*100) if data.get('p25_gbp') else None
-            p75 = int(float(data.get('p75_gbp', 0))*100) if data.get('p75_gbp') else None
-        except (TypeError, ValueError):
-            rec = p25 = p75 = None
-        examples = data.get('examples', [])[:5]
+    price_estimate = await pricing_service.suggest_price(
+        brand=params.get('brand'),
+        category=params.get('item_type'),
+        size=params.get('size'),
+        colour=params.get('colour'),
+        condition=attrs.get('condition') or 'Good',
+    )
+    rec = _gbp_to_pence(price_estimate.mid)
+    p25 = _gbp_to_pence(price_estimate.low)
+    p75 = _gbp_to_pence(price_estimate.high)
+    examples = price_estimate.examples
 
     with connect() as c:
         if rec is not None:
