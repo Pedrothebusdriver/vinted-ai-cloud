@@ -6,7 +6,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 EVENT_DIR = Path(os.getenv("EVENTS_DIR", "data/events"))
 EVENT_DIR.mkdir(parents=True, exist_ok=True)
@@ -41,4 +41,42 @@ def record_event(kind: str, payload: Optional[Dict[str, Any]] = None) -> None:
         fh.write("\n")
 
 
-__all__ = ["record_event"]
+def _iter_event_files() -> Iterable[Path]:
+    if not EVENT_DIR.exists():
+        return []
+    files = sorted(EVENT_DIR.glob("*.jsonl"), reverse=True)
+    return files
+
+
+def list_events(limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    Return up to ``limit`` most recent events across all JSONL files.
+
+    Events are ordered newest-first by walking daily files in reverse order and
+    reading each day's entries backwards.
+    """
+    if limit <= 0:
+        return []
+
+    collected: List[Dict[str, Any]] = []
+    for path in _iter_event_files():
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                lines = fh.readlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                doc = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            collected.append(doc)
+            if len(collected) >= limit:
+                return collected
+    return collected
+
+
+__all__ = ["record_event", "list_events"]
