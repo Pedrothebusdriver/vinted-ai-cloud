@@ -4,6 +4,7 @@ import {
   Button,
   FlatList,
   Image,
+  RefreshControl,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -53,6 +54,7 @@ export const DraftListScreen = ({ navigation }: Props) => {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterValue>("all");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadDrafts = useCallback(async () => {
     setLoading(true);
@@ -78,6 +80,15 @@ export const DraftListScreen = ({ navigation }: Props) => {
 
   useEffect(() => {
     loadDrafts();
+  }, [loadDrafts]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadDrafts();
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadDrafts]);
 
   const renderItem = ({ item }: { item: DraftSummary }) => (
@@ -160,8 +171,9 @@ export const DraftListScreen = ({ navigation }: Props) => {
         keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
         contentContainerStyle={styles.list}
-        refreshing={loading}
-        onRefresh={loadDrafts}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
         ListEmptyComponent={
           !loading ? (
             <View style={styles.empty}>
