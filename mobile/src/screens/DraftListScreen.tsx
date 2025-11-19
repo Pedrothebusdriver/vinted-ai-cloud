@@ -14,6 +14,7 @@ import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { DraftStatus, DraftSummary, fetchDrafts } from "../api";
 import { useServer } from "../state/ServerContext";
 import { RootStackParamList } from "../navigation/types";
+import { ServerSettingsModal } from "../components/ServerSettingsModal";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Drafts">;
 type FilterValue = "all" | DraftStatus;
@@ -51,6 +52,7 @@ export const DraftListScreen = ({ navigation }: Props) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterValue>("all");
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const loadDrafts = useCallback(async () => {
     setLoading(true);
@@ -121,10 +123,13 @@ export const DraftListScreen = ({ navigation }: Props) => {
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <Text style={styles.heading}>Drafts</Text>
-        <Button
-          title="Upload photos"
-          onPress={() => navigation.navigate("Upload")}
-        />
+        <View style={styles.headerActions}>
+          <Button title="Settings" onPress={() => setSettingsOpen(true)} />
+          <Button
+            title="Upload photos"
+            onPress={() => navigation.navigate("Upload")}
+          />
+        </View>
       </View>
       <Text style={styles.server}>Server: {baseUrl}</Text>
       <View style={styles.filterRow}>
@@ -167,6 +172,10 @@ export const DraftListScreen = ({ navigation }: Props) => {
           ) : null
         }
       />
+      <ServerSettingsModal
+        visible={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
     </SafeAreaView>
   );
 };
@@ -207,13 +216,16 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: 20,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    gap: 12,
   },
   heading: {
     fontSize: 24,
     fontWeight: "700",
+  },
+  headerActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 12,
   },
   server: {
     paddingHorizontal: 20,

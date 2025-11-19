@@ -37,7 +37,7 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [x] M1-01 – Document every ingest stage (`convert`, `ocr`, `pricing`) with docstrings and comments in `pi-app/app/core/ingest.py` so future contributors know where to plug in logic.
 - [x] M1-02 – Move `_preprocess_for_ocr` from `main.py` into `core/ingest.py` and adjust imports so tests can use it without FastAPI.
 - [x] M1-03 – Create a small logging helper inside `core/ingest.py` (or `core/logging.py`) that standardises structured logs for item IDs and rejection reasons.
-- [ ] M1-04 – Add retry/backoff logic around `ocr.read_text` failures, capturing errors via `events.record_event`.
+- [x] M1-04 – Add retry/backoff logic around `ocr.read_text` failures, capturing errors via `events.record_event`.
 - [ ] M1-05 – Normalize incoming metadata with a new `sanitize_metadata` function that strips blanks and lowercases expected keys before ingest uses them.
 - [ ] M1-06 – Extract colour detection into a dedicated helper returning both the hex value and human label; write at least two unit tests using sample images.
 - [ ] M1-07 – Add dependency-injection hooks so ingest functions accept optional compliance/OCR implementations, making tests easier.
@@ -117,7 +117,7 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [x] Persist the server URL (and upload key placeholder) to `AsyncStorage` inside `ServerProvider`, hydrating it on launch (Nov 18).
 - [x] Add an optional Upload Key input on the Connect screen and include it in every API request’s `X-Upload-Key` header (2025-11-18 – Connect screen now stores the key and API helper injects `X-Upload-Key`).
 - [ ] M2-01 – Add a pull-to-refresh gesture on the Connect screen to quickly re-check `/health`.
-- [ ] M2-02 – Build an “App Settings” modal allowing the user to edit base URL + upload key with inline validation.
+- [x] M2-02 – Build an “App Settings” modal allowing the user to edit base URL + upload key with inline validation. (2025-11-19 – Draft list now has a Settings modal that edits/persists URL + upload key.)
 - [ ] M2-03 – Persist a “last connected” timestamp and show it on the Connect screen.
 - [ ] M2-04 – Add support for multiple saved servers (list + select) stored in AsyncStorage.
 - [ ] M2-05 – Display the FastAPI version returned by `/health` and warn if it’s outdated vs bundled schema version.
