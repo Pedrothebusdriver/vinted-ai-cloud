@@ -118,7 +118,7 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [x] Add an optional Upload Key input on the Connect screen and include it in every API request’s `X-Upload-Key` header (2025-11-18 – Connect screen now stores the key and API helper injects `X-Upload-Key`).
 - [ ] M2-01 – Add a pull-to-refresh gesture on the Connect screen to quickly re-check `/health`.
 - [x] M2-02 – Build an “App Settings” modal allowing the user to edit base URL + upload key with inline validation. (2025-11-19 – Draft list now has a Settings modal that edits/persists URL + upload key.)
-- [ ] M2-03 – Persist a “last connected” timestamp and show it on the Connect screen.
+- [x] M2-03 – Persist a “last connected” timestamp and show it on the Connect screen. (2025-11-19 – Connection success now stores a timestamp and surfaces it on Connect.)
 - [ ] M2-04 – Add support for multiple saved servers (list + select) stored in AsyncStorage.
 - [ ] M2-05 – Display the FastAPI version returned by `/health` and warn if it’s outdated vs bundled schema version.
 

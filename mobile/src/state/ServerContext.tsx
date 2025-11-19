@@ -13,11 +13,13 @@ import { Config } from "../config";
 type ServerState = {
   baseUrl: string;
   uploadKey: string | null;
+  lastConnected: string | null;
 };
 
 type ServerContextValue = ServerState & {
   setBaseUrl: (next: string) => void;
   setUploadKey: (next: string | null) => void;
+  setLastConnected: (value: string | null) => void;
   hydrated: boolean;
 };
 
@@ -25,6 +27,7 @@ const STORAGE_KEY = "@fliplens/server-settings";
 const DEFAULT_STATE: ServerState = {
   baseUrl: Config.apiBase,
   uploadKey: null,
+  lastConnected: null,
 };
 
 const ServerContext = createContext<ServerContextValue | undefined>(undefined);
@@ -42,6 +45,7 @@ export const ServerProvider = ({ children }: PropsWithChildren) => {
           setState({
             baseUrl: parsed.baseUrl || Config.apiBase,
             uploadKey: parsed.uploadKey || null,
+            lastConnected: parsed.lastConnected || null,
           });
         }
       } catch (error) {
@@ -75,13 +79,16 @@ export const ServerProvider = ({ children }: PropsWithChildren) => {
     () => ({
       baseUrl: state.baseUrl,
       uploadKey: state.uploadKey,
+      lastConnected: state.lastConnected,
       hydrated,
       setBaseUrl: (next: string) =>
         updateState({ baseUrl: next.trim() || Config.apiBase }),
       setUploadKey: (next: string | null) =>
         updateState({ uploadKey: next?.trim() || null }),
+      setLastConnected: (value: string | null) =>
+        updateState({ lastConnected: value }),
     }),
-    [hydrated, state.baseUrl, state.uploadKey, updateState]
+    [hydrated, state.baseUrl, state.lastConnected, state.uploadKey, updateState]
   );
 
   return (

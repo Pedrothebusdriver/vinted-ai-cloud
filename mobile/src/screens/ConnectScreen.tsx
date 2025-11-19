@@ -19,8 +19,15 @@ import { RootStackParamList } from "../navigation/types";
 type Props = NativeStackScreenProps<RootStackParamList, "Connect">;
 
 export const ConnectScreen = ({ navigation }: Props) => {
-  const { baseUrl, uploadKey, setBaseUrl, setUploadKey, hydrated } =
-    useServer();
+  const {
+    baseUrl,
+    uploadKey,
+    lastConnected,
+    setBaseUrl,
+    setUploadKey,
+    setLastConnected,
+    hydrated,
+  } = useServer();
   const [url, setUrl] = useState(baseUrl);
   const [key, setKey] = useState(uploadKey || "");
   const [status, setStatus] = useState<"idle" | "ok" | "error">("idle");
@@ -38,6 +45,15 @@ export const ConnectScreen = ({ navigation }: Props) => {
   const cleanUrl = useMemo(() => url.trim(), [url]);
   const cleanKey = useMemo(() => key.trim(), [key]);
 
+  const lastConnectedLabel = useMemo(() => {
+    if (!lastConnected) return null;
+    try {
+      return new Date(lastConnected).toLocaleString();
+    } catch {
+      return lastConnected;
+    }
+  }, [lastConnected]);
+
   const testConnection = useCallback(async () => {
     setPending(true);
     setStatus("idle");
@@ -53,13 +69,14 @@ export const ConnectScreen = ({ navigation }: Props) => {
       setMessage(text);
       setBaseUrl(cleanUrl || baseUrl);
       setUploadKey(cleanKey || null);
+      setLastConnected(new Date().toISOString());
     } catch (err: any) {
       setStatus("error");
       setMessage(err.message || "Unable to reach server.");
     } finally {
       setPending(false);
     }
-  }, [baseUrl, cleanKey, cleanUrl, setBaseUrl, setUploadKey]);
+  }, [baseUrl, cleanKey, cleanUrl, setBaseUrl, setLastConnected, setUploadKey]);
 
   const proceed = useCallback(() => {
     setBaseUrl(cleanUrl || baseUrl);
@@ -127,6 +144,11 @@ export const ConnectScreen = ({ navigation }: Props) => {
           </Text>
         </View>
         <View style={styles.divider} />
+        {lastConnectedLabel && (
+          <Text style={styles.meta}>
+            Last connected: {lastConnectedLabel}
+          </Text>
+        )}
         <Button
           title="Continue"
           onPress={proceed}
@@ -187,6 +209,9 @@ const styles = StyleSheet.create({
   },
   helper: {
     color: "#6b7280",
+  },
+  meta: {
+    color: "#4b5563",
   },
   code: {
     fontFamily: Platform.select({

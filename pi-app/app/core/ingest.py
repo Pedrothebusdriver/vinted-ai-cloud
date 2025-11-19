@@ -8,7 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from app import compliance
+import time
+
+from app import compliance, events
 from app.core import category_suggester
 from app.core.models import CategorySuggestion, Draft, DraftPhoto
 from app.core.pricing import PricingService
@@ -71,6 +73,8 @@ class IngestService:
         learned_lookup: Optional[LearnedLookup] = None,
         category_helper: Optional[CategoryFunc] = None,
         convert_semaphore: Optional[asyncio.Semaphore] = None,
+        ocr_max_attempts: int = 3,
+        ocr_retry_delay: float = 0.2,
     ) -> None:
         self._ocr = ocr
         self._pricing = pricing_service
@@ -86,6 +90,8 @@ class IngestService:
         self._learned_lookup = learned_lookup
         self._category_helper = category_helper or category_suggester.suggest_categories
         self._sem = convert_semaphore or asyncio.Semaphore(1)
+        self._ocr_max_attempts = max(1, ocr_max_attempts)
+        self._ocr_retry_delay = max(0.0, ocr_retry_delay)
 
     async def build_draft(
         self,
@@ -105,7 +111,7 @@ class IngestService:
             self._log_event("photos_rejected", level="warning", item_id=item_id)
             raise DraftRejected(["non_compliant"])
 
-        label_text, label_hash = self._read_label_text(allowed)
+        label_text, label_hash = self._read_label_text(item_id, allowed)
         brand, brand_conf, size, size_conf = self._detect_from_sources(
             label_text=label_text,
             filepaths=filepaths,
@@ -267,17 +273,51 @@ class IngestService:
         except Exception as exc:  # pragma: no cover - best effort logging
             logger.debug("thumb_placeholder_failed", error=str(exc))
 
-    def _read_label_text(self, photos: Sequence[ProcessedPhoto]) -> Tuple[str, Optional[str]]:
+    def _read_label_text(self, item_id: int, photos: Sequence[ProcessedPhoto]) -> Tuple[str, Optional[str]]:
         """Read OCR text from the best available photo and compute label hash."""
         best_score, best_text = -1, ""
         for photo in photos:
             prep = self._preprocess_for_ocr(photo.optimised)
-            text = self._ocr.read_text(prep)
+            text = self._run_ocr_with_retry(item_id, prep)
             score = sum(ch.isalnum() for ch in text)
             if score > best_score:
                 best_score, best_text = score, text
         label_hash = self._label_hash(best_text) if best_text else None
         return best_text, label_hash
+
+    def _run_ocr_with_retry(self, item_id: int, img_path: Path) -> str:
+        """Call OCR with retries/backoff, logging failures along the way."""
+        last_error = ""
+        for attempt in range(1, self._ocr_max_attempts + 1):
+            try:
+                return self._ocr.read_text(img_path)
+            except Exception as exc:
+                last_error = str(exc)
+                self._log_event(
+                    "ocr_attempt_failed",
+                    level="warning",
+                    item_id=item_id,
+                    attempt=attempt,
+                    error=last_error,
+                )
+                events.record_event(
+                    "ocr_attempt_failed",
+                    {"item_id": item_id, "attempt": attempt, "error": last_error},
+                )
+                if attempt < self._ocr_max_attempts and self._ocr_retry_delay:
+                    time.sleep(self._ocr_retry_delay)
+        self._log_event(
+            "ocr_unrecoverable",
+            level="error",
+            item_id=item_id,
+            attempts=self._ocr_max_attempts,
+            error=last_error or "unknown_error",
+        )
+        events.record_event(
+            "ocr_unrecoverable",
+            {"item_id": item_id, "attempts": self._ocr_max_attempts, "error": last_error},
+        )
+        return ""
 
     def _detect_from_sources(
         self,
