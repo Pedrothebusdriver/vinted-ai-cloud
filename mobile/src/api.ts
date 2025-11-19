@@ -174,6 +174,8 @@ export type DraftUpdatePayload = {
 
 export type DraftListFilters = {
   status?: DraftStatus;
+  brand?: string;
+  size?: string;
 };
 
 export type DraftListPagination = {

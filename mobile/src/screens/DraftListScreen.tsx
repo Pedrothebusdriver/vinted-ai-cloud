@@ -13,10 +13,16 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { DraftStatus, DraftSummary, fetchDrafts } from "../api";
+import {
+  DraftListFilters,
+  DraftStatus,
+  DraftSummary,
+  fetchDrafts,
+} from "../api";
 import { useServer } from "../state/ServerContext";
 import { RootStackParamList } from "../navigation/types";
 import { ServerSettingsModal } from "../components/ServerSettingsModal";
+import { DraftFilterSheet } from "../components/DraftFilterSheet";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Drafts">;
 type FilterValue = "all" | DraftStatus;
@@ -61,8 +67,17 @@ export const DraftListScreen = ({ navigation }: Props) => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [advancedFilters, setAdvancedFilters] = useState<{
+    brand?: string;
+    size?: string;
+  }>({});
   const draftsRef = useRef<DraftSummary[]>([]);
   const hasMoreRef = useRef(true);
+  const filtersKey = `${filter}-${advancedFilters.brand ?? ""}-${advancedFilters.size ?? ""}`;
+  const hasAdvancedFilters = Boolean(
+    advancedFilters.brand || advancedFilters.size
+  );
 
   const loadDrafts = useCallback(
     async ({ append = false }: { append?: boolean } = {}) => {
@@ -76,10 +91,15 @@ export const DraftListScreen = ({ navigation }: Props) => {
         setError(null);
       }
       try {
-        const filters = filter === "all" ? undefined : { status: filter };
+        const filtersPayload: DraftListFilters = {
+          ...advancedFilters,
+        };
+        if (filter !== "all") {
+          filtersPayload.status = filter;
+        }
         const offset = append ? draftsRef.current.length : 0;
         const data = await fetchDrafts(baseUrl, {
-          filters,
+          filters: filtersPayload,
           uploadKey,
           pagination: {
             limit: PAGE_SIZE,
@@ -96,11 +116,33 @@ export const DraftListScreen = ({ navigation }: Props) => {
             : `${fallbackMessage} Showing samples.`
         );
         if (!append) {
-          setDrafts(
-            filter === "all"
-              ? PLACEHOLDER_DRAFTS
-              : PLACEHOLDER_DRAFTS.filter((draft) => draft.status === filter)
-          );
+          const fallbackDrafts = (filter === "all"
+            ? PLACEHOLDER_DRAFTS
+            : PLACEHOLDER_DRAFTS.filter((draft) => draft.status === filter)
+          ).filter((draft) => {
+            if (advancedFilters.brand) {
+              if (
+                !draft.brand ||
+                !draft.brand
+                  .toLowerCase()
+                  .includes(advancedFilters.brand.toLowerCase())
+              ) {
+                return false;
+              }
+            }
+            if (advancedFilters.size) {
+              if (
+                !draft.size ||
+                !draft.size
+                  .toLowerCase()
+                  .includes(advancedFilters.size.toLowerCase())
+              ) {
+                return false;
+              }
+            }
+            return true;
+          });
+          setDrafts(fallbackDrafts);
           setHasMore(false);
         }
       } finally {
@@ -111,7 +153,7 @@ export const DraftListScreen = ({ navigation }: Props) => {
         }
       }
     },
-    [baseUrl, filter, uploadKey]
+    [advancedFilters, baseUrl, filter, uploadKey]
   );
 
 
@@ -127,7 +169,7 @@ export const DraftListScreen = ({ navigation }: Props) => {
     setHasMore(true);
     hasMoreRef.current = true;
     loadDrafts();
-  }, [filter, loadDrafts]);
+  }, [filtersKey, loadDrafts]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -215,7 +257,30 @@ export const DraftListScreen = ({ navigation }: Props) => {
             </Text>
           </TouchableOpacity>
         ))}
+        <TouchableOpacity
+          style={[
+            styles.filterButton,
+            hasAdvancedFilters && styles.filterButtonActive,
+          ]}
+          onPress={() => setFiltersOpen(true)}
+        >
+          <Text
+            style={[
+              styles.filterButtonText,
+              hasAdvancedFilters && styles.filterButtonTextActive,
+            ]}
+          >
+            Filters
+          </Text>
+        </TouchableOpacity>
       </View>
+      {hasAdvancedFilters && (
+        <Text style={styles.filterSummary}>
+          Active filters:
+          {advancedFilters.brand ? ` Brand=${advancedFilters.brand}` : ""}
+          {advancedFilters.size ? ` Size=${advancedFilters.size}` : ""}
+        </Text>
+      )}
       {loading && <ActivityIndicator style={{ marginVertical: 12 }} />}
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <FlatList
@@ -258,6 +323,17 @@ export const DraftListScreen = ({ navigation }: Props) => {
       <ServerSettingsModal
         visible={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+      />
+      <DraftFilterSheet
+        visible={filtersOpen}
+        status={filter}
+        statusOptions={FILTERS}
+        onStatusChange={(value) => setFilter(value as FilterValue)}
+        brand={advancedFilters.brand}
+        size={advancedFilters.size}
+        onApply={(filters) => setAdvancedFilters(filters)}
+        onClear={() => setAdvancedFilters({})}
+        onClose={() => setFiltersOpen(false)}
       />
     </SafeAreaView>
   );
@@ -370,6 +446,29 @@ const styles = StyleSheet.create({
   filterChipActive: {
     backgroundColor: "#111827",
     borderColor: "#111827",
+  },
+  filterButton: {
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+  },
+  filterButtonActive: {
+    borderColor: "#2563eb",
+    backgroundColor: "#eff6ff",
+  },
+  filterButtonText: {
+    fontWeight: "600",
+    color: "#111827",
+  },
+  filterButtonTextActive: {
+    color: "#2563eb",
+  },
+  filterSummary: {
+    paddingHorizontal: 20,
+    color: "#2563eb",
+    marginTop: 8,
   },
   filterText: {
     color: "#374151",
