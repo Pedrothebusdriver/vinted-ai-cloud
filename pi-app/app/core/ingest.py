@@ -100,8 +100,9 @@ class IngestService:
             raise DraftRejected(["no_photos"])
         meta = metadata or {}
         converted = await self._convert_images(item_id, filepaths)
-        allowed = self._filter_compliant(converted)
+        allowed = self._filter_compliant(item_id, converted)
         if not allowed:
+            self._log_event("photos_rejected", level="warning", item_id=item_id)
             raise DraftRejected(["non_compliant"])
 
         label_text, label_hash = self._read_label_text(allowed)
@@ -171,6 +172,21 @@ class IngestService:
         ]
         return draft
 
+    def _log_event(
+        self,
+        event: str,
+        *,
+        level: str = "info",
+        item_id: Optional[int] = None,
+        **extra: Any,
+    ) -> None:
+        """Structured logging helper for ingest events."""
+        payload = dict(extra)
+        if item_id is not None:
+            payload["item_id"] = item_id
+        log_fn = getattr(logger, level, logger.info)
+        log_fn(event, **payload)
+
     async def _convert_images(
         self,
         item_id: int,
@@ -194,10 +210,15 @@ class IngestService:
                     results.append(ProcessedPhoto(original=src, optimised=dst, thumb=thumb))
                 else:
                     self._copy_placeholder_thumb(thumb)
-                    logger.warning("convert_failed", src=str(src))
+                    self._log_event(
+                        "convert_failed",
+                        level="warning",
+                        item_id=item_id,
+                        source=str(src),
+                    )
         return results
 
-    def _filter_compliant(self, photos: Sequence[ProcessedPhoto]) -> List[ProcessedPhoto]:
+    def _filter_compliant(self, item_id: int, photos: Sequence[ProcessedPhoto]) -> List[ProcessedPhoto]:
         """
         Run compliance checks on each converted photo and drop rejected files.
 
@@ -212,7 +233,20 @@ class IngestService:
             else:
                 rejected.append(reason)
                 self._cleanup_photo(photo)
+                self._log_event(
+                    "photo_rejected",
+                    level="warning",
+                    item_id=item_id,
+                    reason=reason,
+                    photo=str(photo.optimised),
+                )
         if not allowed:
+            self._log_event(
+                "all_photos_rejected",
+                level="warning",
+                item_id=item_id,
+                reasons="; ".join(rejected) if rejected else None,
+            )
             raise DraftRejected(rejected or ["no_valid_photos"])
         return allowed
 

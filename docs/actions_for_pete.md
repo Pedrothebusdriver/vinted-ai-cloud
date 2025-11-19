@@ -36,7 +36,7 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [x] Update `/api/upload` to become a thin shim that calls `core.ingest.build_draft(...)` so new endpoints can reuse the same code path while the legacy Shortcut keeps working.
 - [x] M1-01 – Document every ingest stage (`convert`, `ocr`, `pricing`) with docstrings and comments in `pi-app/app/core/ingest.py` so future contributors know where to plug in logic.
 - [x] M1-02 – Move `_preprocess_for_ocr` from `main.py` into `core/ingest.py` and adjust imports so tests can use it without FastAPI.
-- [ ] M1-03 – Create a small logging helper inside `core/ingest.py` (or `core/logging.py`) that standardises structured logs for item IDs and rejection reasons.
+- [x] M1-03 – Create a small logging helper inside `core/ingest.py` (or `core/logging.py`) that standardises structured logs for item IDs and rejection reasons.
 - [ ] M1-04 – Add retry/backoff logic around `ocr.read_text` failures, capturing errors via `events.record_event`.
 - [ ] M1-05 – Normalize incoming metadata with a new `sanitize_metadata` function that strips blanks and lowercases expected keys before ingest uses them.
 - [ ] M1-06 – Extract colour detection into a dedicated helper returning both the hex value and human label; write at least two unit tests using sample images.

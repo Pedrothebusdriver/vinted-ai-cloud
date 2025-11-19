@@ -3,6 +3,8 @@ import {
   ActivityIndicator,
   Button,
   Platform,
+  RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -24,6 +26,7 @@ export const ConnectScreen = ({ navigation }: Props) => {
   const [status, setStatus] = useState<"idle" | "ok" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (hydrated) {
@@ -64,9 +67,24 @@ export const ConnectScreen = ({ navigation }: Props) => {
     navigation.navigate("Drafts");
   }, [baseUrl, cleanKey, cleanUrl, navigation, setBaseUrl, setUploadKey]);
 
+  const onRefresh = useCallback(async () => {
+    if (pending) return;
+    setRefreshing(true);
+    try {
+      await testConnection();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [pending, testConnection]);
+
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         <Text style={styles.heading}>FlipLens server</Text>
         <Text style={styles.description}>
           Enter the Pi or Core server URL. We&apos;ll remember this for uploads
@@ -114,7 +132,7 @@ export const ConnectScreen = ({ navigation }: Props) => {
           onPress={proceed}
           disabled={!hydrated || pending}
         />
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };
