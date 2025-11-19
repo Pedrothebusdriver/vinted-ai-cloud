@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -23,9 +24,12 @@ export const ConnectScreen = ({ navigation }: Props) => {
     baseUrl,
     uploadKey,
     lastConnected,
+    servers,
     setBaseUrl,
     setUploadKey,
     setLastConnected,
+    addServer,
+    selectServer,
     hydrated,
   } = useServer();
   const [url, setUrl] = useState(baseUrl);
@@ -94,6 +98,16 @@ export const ConnectScreen = ({ navigation }: Props) => {
     }
   }, [pending, testConnection]);
 
+  const onSaveServer = useCallback(() => {
+    const targetUrl = cleanUrl || baseUrl;
+    if (!targetUrl) return;
+    addServer({
+      baseUrl: targetUrl,
+      uploadKey: cleanKey || uploadKey || null,
+      lastConnected,
+    });
+  }, [addServer, baseUrl, cleanKey, cleanUrl, lastConnected, uploadKey]);
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView
@@ -128,6 +142,11 @@ export const ConnectScreen = ({ navigation }: Props) => {
             {message}
           </Text>
         )}
+        <Button
+          title="Save this server"
+          onPress={onSaveServer}
+          disabled={!cleanUrl && !baseUrl}
+        />
         <View style={styles.field}>
           <Text style={styles.label}>Upload key (optional)</Text>
           <TextInput
@@ -148,6 +167,43 @@ export const ConnectScreen = ({ navigation }: Props) => {
           <Text style={styles.meta}>
             Last connected: {lastConnectedLabel}
           </Text>
+        )}
+        {servers.length > 0 && (
+          <View style={styles.savedList}>
+            <Text style={styles.savedHeading}>Saved servers</Text>
+            {servers.map((server) => {
+              let label = server.label || server.baseUrl;
+              let savedLast: string | null = null;
+              if (server.lastConnected) {
+                try {
+                  savedLast = new Date(server.lastConnected).toLocaleString();
+                } catch {
+                  savedLast = server.lastConnected;
+                }
+              }
+              const isActive =
+                server.baseUrl === baseUrl &&
+                (server.uploadKey || null) === (uploadKey || null);
+              return (
+                <TouchableOpacity
+                  key={server.id}
+                  style={[
+                    styles.savedCard,
+                    isActive && styles.savedCardActive,
+                  ]}
+                  onPress={() => selectServer(server.id)}
+                >
+                  <Text style={styles.savedLabel}>{label}</Text>
+                  <Text style={styles.savedUrl}>{server.baseUrl}</Text>
+                  {savedLast && (
+                    <Text style={styles.savedMeta}>
+                      Last connected: {savedLast}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         )}
         <Button
           title="Continue"
@@ -212,6 +268,36 @@ const styles = StyleSheet.create({
   },
   meta: {
     color: "#4b5563",
+  },
+  savedList: {
+    gap: 12,
+    paddingVertical: 12,
+  },
+  savedHeading: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  savedCard: {
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 10,
+    padding: 12,
+    gap: 4,
+  },
+  savedCardActive: {
+    borderColor: "#2563eb",
+    backgroundColor: "#eff6ff",
+  },
+  savedLabel: {
+    fontWeight: "600",
+  },
+  savedUrl: {
+    color: "#4b5563",
+    fontSize: 13,
+  },
+  savedMeta: {
+    color: "#6b7280",
+    fontSize: 12,
   },
   code: {
     fontFamily: Platform.select({
