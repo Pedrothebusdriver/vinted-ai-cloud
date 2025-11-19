@@ -119,7 +119,7 @@ class IngestService:
             filepaths=filepaths,
             metadata=meta,
         )
-        colour = self._colour_detector(allowed[0].optimised) if allowed else "Unknown"
+        colour = _detect_colour_from_photos(self._colour_detector, allowed)
         name_hint = filepaths[0].name if filepaths else "clothing"
         item_type, item_conf = self._item_detector(name_hint)
         meta_vinted = (meta.get("vinted") or {}) if isinstance(meta, dict) else {}
@@ -425,3 +425,15 @@ def _normalize_metadata(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             cleaned_value = value
         cleaned[target_key] = cleaned_value
     return cleaned
+def _detect_colour_from_photos(
+    detector: ColourDetector,
+    photos: Sequence[ProcessedPhoto],
+) -> str:
+    """Return the dominant colour for the first available photo."""
+    if not photos:
+        return "Unknown"
+    try:
+        return detector(photos[0].optimised)
+    except Exception as exc:  # pragma: no cover - detector errors are rare
+        logger.warning("colour_detect_failed", error=str(exc))
+        return "Unknown"
