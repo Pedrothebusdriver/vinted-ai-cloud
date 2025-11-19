@@ -176,6 +176,11 @@ class IngestService:
         item_id: int,
         filepaths: Sequence[Path],
     ) -> List[ProcessedPhoto]:
+        """
+        Convert uploaded files into optimised JPEGs plus thumbnails.
+
+        Heavy work is serialized via a semaphore so we do not overwhelm the Pi.
+        """
         results: List[ProcessedPhoto] = []
         out_dir = self._paths.converted_root / f"item-{item_id}"
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -193,6 +198,11 @@ class IngestService:
         return results
 
     def _filter_compliant(self, photos: Sequence[ProcessedPhoto]) -> List[ProcessedPhoto]:
+        """
+        Run compliance checks on each converted photo and drop rejected files.
+
+        Rejections are tracked so callers can surface meaningful error messages.
+        """
         allowed: List[ProcessedPhoto] = []
         rejected: List[str] = []
         for photo in photos:
@@ -214,6 +224,7 @@ class IngestService:
                 photo.thumb.unlink()
 
     def _copy_placeholder_thumb(self, thumb: Path) -> None:
+        """Create a placeholder thumbnail when conversion fails."""
         if not self._paths.placeholder_thumb:
             return
         try:
@@ -223,6 +234,7 @@ class IngestService:
             logger.debug("thumb_placeholder_failed", error=str(exc))
 
     def _read_label_text(self, photos: Sequence[ProcessedPhoto]) -> Tuple[str, Optional[str]]:
+        """Read OCR text from the best available photo and compute label hash."""
         best_score, best_text = -1, ""
         for photo in photos:
             prep = self._preprocess_for_ocr(photo.optimised)
@@ -240,6 +252,11 @@ class IngestService:
         filepaths: Sequence[Path],
         metadata: Dict[str, Any],
     ) -> Tuple[Optional[str], str, Optional[str], str]:
+        """
+        Combine OCR, learned labels, and metadata slugs to guess brand + size.
+
+        Returns both the detected values and confidence labels to store in the DB.
+        """
         meta_vinted = (metadata.get("vinted") or {}) if isinstance(metadata, dict) else {}
         brand = size = None
         brand_conf = size_conf = "Low"
@@ -288,3 +305,25 @@ class IngestService:
                 if brand and size:
                     break
         return (brand or None, brand_conf, size or None, size_conf)
+def preprocess_for_ocr(img_path: Path) -> Path:
+    """
+    Prepare a photo for OCR by boosting contrast and removing noise.
+
+    This mirrors the legacy helper from `main.py` so tests and other modules
+    can reuse the same preprocessing logic without importing the web app.
+    """
+    try:
+        from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+
+        im = Image.open(img_path)
+        im = im.convert("L")
+        im = ImageOps.autocontrast(im)
+        im = ImageEnhance.Contrast(im).enhance(1.6)
+        im = im.filter(ImageFilter.MedianFilter(size=3))
+        im = im.point(lambda p: 255 if p > 160 else 0)
+        out = img_path.with_suffix(".ocr.jpg")
+        im.save(out, quality=85)
+        return out
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.warning("ocr_preprocess_failed", path=str(img_path), error=str(exc))
+        return img_path

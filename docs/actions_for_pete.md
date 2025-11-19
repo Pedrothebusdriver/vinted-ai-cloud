@@ -34,8 +34,8 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [x] Implement `pi-app/app/core/pricing.py` that wraps the current COMPS helper, clamps prices between the env min/max, caches results by `(brand, category_id, size, condition)`, and exposes `suggest_price(...) -> {low, mid, high}`.
 - [x] Extract `_process_item` logic into `pi-app/app/core/ingest.py`: convert + optimise photos, run compliance + OCR, fill brand/size/colour/type, call category/pricing helpers, and return a `Draft` model with ordered `DraftPhoto`s.
 - [x] Update `/api/upload` to become a thin shim that calls `core.ingest.build_draft(...)` so new endpoints can reuse the same code path while the legacy Shortcut keeps working.
-- [ ] M1-01 – Document every ingest stage (`convert`, `ocr`, `pricing`) with docstrings and comments in `pi-app/app/core/ingest.py` so future contributors know where to plug in logic.
-- [ ] M1-02 – Move `_preprocess_for_ocr` from `main.py` into `core/ingest.py` and adjust imports so tests can use it without FastAPI.
+- [x] M1-01 – Document every ingest stage (`convert`, `ocr`, `pricing`) with docstrings and comments in `pi-app/app/core/ingest.py` so future contributors know where to plug in logic.
+- [x] M1-02 – Move `_preprocess_for_ocr` from `main.py` into `core/ingest.py` and adjust imports so tests can use it without FastAPI.
 - [ ] M1-03 – Create a small logging helper inside `core/ingest.py` (or `core/logging.py`) that standardises structured logs for item IDs and rejection reasons.
 - [ ] M1-04 – Add retry/backoff logic around `ocr.read_text` failures, capturing errors via `events.record_event`.
 - [ ] M1-05 – Normalize incoming metadata with a new `sanitize_metadata` function that strips blanks and lowercases expected keys before ingest uses them.
@@ -156,8 +156,8 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 ### 3.3 Upload + post helper
 
 - [x] Basic Upload screen selects/takes photos and POSTs to `/api/upload` with optional metadata JSON.
-- [ ] Switch the Upload screen to call the new `POST /api/drafts` endpoint (reuse the stored upload key/header) once the backend exposes it.
-- [ ] Replace the raw metadata textarea with simple inputs (brand, size, condition dropdowns) that compose JSON for the backend.
+- [x] Switch the Upload screen to call the new `POST /api/drafts` endpoint (reuse the stored upload key/header) once the backend exposes it. (2025-11-19 – UploadScreen now hits `/api/drafts` with the stored upload key and jumps straight into the new draft.)
+- [x] Replace the raw metadata textarea with simple inputs (brand, size, condition dropdowns) that compose JSON for the backend. (2025-11-19 – Brand, size, and condition chips feed metadata automatically.)
 - [x] After upload, show a success state that deep-links to the new draft (navigate to `DraftDetailScreen`). (2025-11-18 – Upload screen takes you straight into Draft Detail when the server replies with an `item_id`.)
 - [x] Add a “Post to Vinted” helper button on `DraftDetailScreen`: copy title/description/price to the clipboard and open the Vinted app (or instructions) so Pete can publish quickly. (2025-11-18 – helper copies listing text and opens or guides you to the Vinted app.)
 - [ ] M2-31 – Add validation/error banners to the Upload screen to surface auth failures or compliance rejection reasons returned by the server.

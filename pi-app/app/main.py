@@ -38,7 +38,12 @@ from app.api.schemas import (
     PriceResponseSchema,
 )
 from app.classifier import dominant_colour, item_type_from_name
-from app.core.ingest import DraftRejected, IngestPaths, IngestService
+from app.core.ingest import (
+    DraftRejected,
+    IngestPaths,
+    IngestService,
+    preprocess_for_ocr as core_preprocess_for_ocr,
+)
 from app.core.models import Draft, PriceEstimate
 from app.core.pricing import PricingService
 from app.db import connect, init_db, now
@@ -314,25 +319,6 @@ def detect_brand_size(label_text: str) -> Tuple[Optional[str], str, Optional[str
 
     return brand, bconf, size, sconf
 
-# ---------- OCR helpers ----------
-def _preprocess_for_ocr(img_path: Path) -> Path:
-    """Lightweight label boost: grayscale + autocontrast + threshold."""
-    try:
-        from PIL import ImageEnhance, ImageFilter, ImageOps
-        im = Image.open(img_path)
-        im = im.convert('L')  # grayscale
-        im = ImageOps.autocontrast(im)
-        im = ImageEnhance.Contrast(im).enhance(1.6)
-        im = im.filter(ImageFilter.MedianFilter(size=3))
-        # simple threshold
-        im = im.point(lambda p: 255 if p > 160 else 0)
-        out = img_path.with_suffix('.ocr.jpg')
-        im.save(out, quality=85)
-        return out
-    except Exception as e:
-        log.warning("preprocess failed for %s: %s", img_path, e)
-        return img_path
-
 def _load_ingest_meta(item_id: int) -> Dict[str, Any]:
     path = INGEST_META / f'item-{item_id}.json'
     if path.exists():
@@ -564,7 +550,7 @@ ingest_service = IngestService(
     ),
     to_jpeg=to_jpeg,
     make_thumb=make_thumb,
-    preprocess_for_ocr=_preprocess_for_ocr,
+    preprocess_for_ocr=core_preprocess_for_ocr,
     detect_brand_size=detect_brand_size,
     label_hash_fn=_label_hash,
     dominant_colour=dominant_colour,
