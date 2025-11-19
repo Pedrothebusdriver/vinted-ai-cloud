@@ -127,7 +127,7 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [x] Create `DraftDetailScreen` that loads a single draft via `GET /api/drafts/{id}`, displays thumbnails + metadata, and surfaces editable fields (title, description, price, status). Placeholder data shown if backend not ready (Nov 18).
 - [x] Wire `DraftDetailScreen` edits to `PUT /api/drafts/{id}` with optimistic UI feedback (stubs until backend ships).
 - [x] Update `DraftListScreen` to render thumbnails (once API returns URLs), show status chips (Draft/Ready), and add a simple filter/toggle for each list (2025-11-18 – cards now show thumbnail/brand, chips, and filter toggles).
-- [ ] M2-06 – Build a price suggestions card that displays low/mid/high and lets the user pick one to set `selected_price`.
+- [x] M2-06 – Build a price suggestions card that displays low/mid/high and lets the user pick one to set `selected_price`. (2025-11-19 – Draft detail now shows tappable low/mid/high chips that fill the price.)
 - [ ] M2-07 – Add pull-to-refresh on the Draft List + Ready List screens using React Native gesture handlers.
 - [ ] M2-08 – Implement pagination/infinite scroll for `/api/drafts` results using the backend’s new limit/offset params.
 - [ ] M2-09 – Create skeleton shimmer placeholders while loading drafts to avoid blank jumps.

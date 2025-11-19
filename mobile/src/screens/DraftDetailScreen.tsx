@@ -160,6 +160,28 @@ export const DraftDetailScreen = ({ route }: Props) => {
     }
   }, [description, draft, price, priceValue, title]);
 
+  const priceSuggestions = useMemo(() => {
+    if (!draft) return [];
+    const entries: { label: string; value: number }[] = [];
+    if (typeof draft.price_low === "number") {
+      entries.push({ label: "Low", value: draft.price_low });
+    }
+    if (typeof draft.price_mid === "number") {
+      entries.push({ label: "Mid", value: draft.price_mid });
+    }
+    if (typeof draft.price_high === "number") {
+      entries.push({ label: "High", value: draft.price_high });
+    }
+    return entries;
+  }, [draft]);
+
+  const onSelectSuggestedPrice = useCallback(
+    (value: number) => {
+      setPrice(String(value));
+    },
+    [setPrice]
+  );
+
   const body = loading ? (
     <ActivityIndicator style={{ marginTop: 40 }} />
   ) : (
@@ -198,6 +220,37 @@ export const DraftDetailScreen = ({ route }: Props) => {
           onChangeText={setDescription}
         />
       </View>
+      {priceSuggestions.length > 0 && (
+        <View style={styles.priceSuggestions}>
+          <Text style={styles.label}>Price suggestions</Text>
+          <Text style={styles.helper}>
+            Tap a suggestion to fill the price input below.
+          </Text>
+          <View style={styles.priceSuggestionRow}>
+            {priceSuggestions.map((suggestion) => {
+              const numeric = Number(price.trim());
+              const isActive = !Number.isNaN(numeric) && numeric === suggestion.value;
+              return (
+                <TouchableOpacity
+                  key={suggestion.label}
+                  style={[
+                    styles.priceSuggestionCard,
+                    isActive && styles.priceSuggestionActive,
+                  ]}
+                  onPress={() => onSelectSuggestedPrice(suggestion.value)}
+                >
+                  <Text style={styles.priceSuggestionLabel}>
+                    {suggestion.label}
+                  </Text>
+                  <Text style={styles.priceSuggestionValue}>
+                    £{suggestion.value}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      )}
       <View style={styles.row}>
         <View style={[styles.field, styles.flex]}>
           <Text style={styles.label}>Price (£)</Text>
@@ -378,5 +431,34 @@ const styles = StyleSheet.create({
   helper: {
     color: "#6b7280",
     fontSize: 14,
+  },
+  priceSuggestions: {
+    gap: 8,
+  },
+  priceSuggestionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  priceSuggestionCard: {
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 12,
+    padding: 12,
+    width: 120,
+    alignItems: "center",
+    gap: 4,
+  },
+  priceSuggestionActive: {
+    borderColor: "#2563eb",
+    backgroundColor: "#eff6ff",
+  },
+  priceSuggestionLabel: {
+    fontWeight: "600",
+    color: "#111827",
+  },
+  priceSuggestionValue: {
+    fontSize: 18,
+    fontWeight: "700",
   },
 });
