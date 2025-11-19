@@ -120,7 +120,7 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [x] M2-02 – Build an “App Settings” modal allowing the user to edit base URL + upload key with inline validation. (2025-11-19 – Draft list now has a Settings modal that edits/persists URL + upload key.)
 - [x] M2-03 – Persist a “last connected” timestamp and show it on the Connect screen. (2025-11-19 – Connection success now stores a timestamp and surfaces it on Connect.)
 - [x] M2-04 – Add support for multiple saved servers (list + select) stored in AsyncStorage. (2025-11-19 – Connect screen now lets you save multiple servers and tap to switch.)
-- [ ] M2-05 – Display the FastAPI version returned by `/health` and warn if it’s outdated vs bundled schema version.
+- [x] M2-05 – Display the FastAPI version returned by `/health` and warn if it’s outdated vs bundled schema version. (2025-11-19 – Connect screen now shows server version vs expected schema and highlights mismatches.)
 
 ### 3.2 Draft experience
 

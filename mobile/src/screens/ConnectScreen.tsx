@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { fetchHealth } from "../api";
+import { Config } from "../config";
 import { useServer } from "../state/ServerContext";
 import { RootStackParamList } from "../navigation/types";
 
@@ -38,6 +39,7 @@ export const ConnectScreen = ({ navigation }: Props) => {
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [serverVersion, setServerVersion] = useState<string | null>(null);
 
   useEffect(() => {
     if (hydrated) {
@@ -62,6 +64,7 @@ export const ConnectScreen = ({ navigation }: Props) => {
     setPending(true);
     setStatus("idle");
     setMessage(null);
+    setServerVersion(null);
     try {
       const data = await fetchHealth(cleanUrl || baseUrl, {
         uploadKey: cleanKey || null,
@@ -71,12 +74,14 @@ export const ConnectScreen = ({ navigation }: Props) => {
         : "Server responded.";
       setStatus("ok");
       setMessage(text);
+      setServerVersion(data.version || null);
       setBaseUrl(cleanUrl || baseUrl);
       setUploadKey(cleanKey || null);
       setLastConnected(new Date().toISOString());
     } catch (err: any) {
       setStatus("error");
       setMessage(err.message || "Unable to reach server.");
+      setServerVersion(null);
     } finally {
       setPending(false);
     }
@@ -107,6 +112,9 @@ export const ConnectScreen = ({ navigation }: Props) => {
       lastConnected,
     });
   }, [addServer, baseUrl, cleanKey, cleanUrl, lastConnected, uploadKey]);
+
+  const versionMismatch =
+    !!serverVersion && serverVersion !== Config.coreSchemaVersion;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -140,6 +148,17 @@ export const ConnectScreen = ({ navigation }: Props) => {
             style={[styles.status, status === "ok" ? styles.ok : styles.error]}
           >
             {message}
+          </Text>
+        )}
+        {serverVersion && (
+          <Text
+            style={[
+              styles.version,
+              versionMismatch && styles.versionWarning,
+            ]}
+          >
+            Server version: {serverVersion} · Expected:{" "}
+            {Config.coreSchemaVersion}
           </Text>
         )}
         <Button
@@ -268,6 +287,13 @@ const styles = StyleSheet.create({
   },
   meta: {
     color: "#4b5563",
+  },
+  version: {
+    color: "#2563eb",
+    fontWeight: "600",
+  },
+  versionWarning: {
+    color: "#b91c1c",
   },
   savedList: {
     gap: 12,
