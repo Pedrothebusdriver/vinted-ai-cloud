@@ -30,7 +30,13 @@ from prometheus_client import Counter
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from app import compliance, events
-from app.api.schemas import DraftResponseSchema, DraftSummarySchema, DraftUpdatePayload
+from app.api.schemas import (
+    DraftResponseSchema,
+    DraftSummarySchema,
+    DraftUpdatePayload,
+    PriceRequestSchema,
+    PriceResponseSchema,
+)
 from app.classifier import dominant_colour, item_type_from_name
 from app.core.ingest import DraftRejected, IngestPaths, IngestService
 from app.core.models import Draft, PriceEstimate
@@ -609,6 +615,15 @@ def _pence_to_gbp(value: Optional[int]) -> Optional[float]:
         return None
     return round(value / 100.0, 2)
 
+
+def _price_response(estimate: PriceEstimate) -> Dict[str, Any]:
+    return {
+        "low": estimate.low,
+        "mid": estimate.mid,
+        "high": estimate.high,
+        "examples": estimate.examples,
+    }
+
 def _cleanup_temp_files(*paths: Optional[Path]) -> None:
     for p in paths:
         if isinstance(p, Path):
@@ -1140,6 +1155,18 @@ def view_draft(item_id: int, request: Request):
         'rec_price': (price['recommended_pence']/100) if price and price['recommended_pence'] else None,
     }
     return tmpl.TemplateResponse('draft.html', {'request': request, 'd': d})
+
+@app.post('/api/price', response_model=PriceResponseSchema)
+async def price_from_payload(payload: PriceRequestSchema):
+    estimate = await pricing_service.suggest_price(
+        brand=payload.brand,
+        category=payload.category_id or payload.item_type,
+        size=payload.size,
+        colour=payload.colour,
+        condition=payload.condition or "Good",
+    )
+    return _price_response(estimate)
+
 
 @app.get('/api/drafts', response_model=List[DraftSummarySchema])
 def list_drafts(status: Optional[str] = None):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -50,3 +50,19 @@ class DraftUpdatePayload(BaseModel):
 
     class Config:
         allow_population_by_field_name = True
+
+
+class PriceRequestSchema(BaseModel):
+    brand: Optional[str] = None
+    item_type: Optional[str] = None
+    category_id: Optional[str] = None
+    size: Optional[str] = None
+    colour: Optional[str] = None
+    condition: Optional[str] = "Good"
+
+
+class PriceResponseSchema(BaseModel):
+    low: Optional[float] = None
+    mid: Optional[float] = None
+    high: Optional[float] = None
+    examples: List[Dict[str, Any]] = Field(default_factory=list)

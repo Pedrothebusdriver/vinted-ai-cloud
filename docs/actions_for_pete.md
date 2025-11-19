@@ -41,7 +41,7 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [x] Implement `GET /api/drafts/{draft_id}` returning full draft metadata (photos, attributes, price ranges, compliance flags) pulled from SQLite.
 - [x] Implement `PUT /api/drafts/{draft_id}` allowing the mobile app to update title, description, category_id, status, and `selected_price`, updating `updated_at`.
 - [x] Expand `GET /api/drafts` to read from the new `drafts` table, include thumbnails + status + price ranges, and accept `?status=` filters for mobile (drop the legacy `attributes` blob once the new response ships).
-- [ ] Expose `POST /api/price` (or upgrade the existing helper) to call `core.pricing.suggest_price` so Pi UI + mobile can re-run pricing on demand.
+- [x] Expose `POST /api/price` (or upgrade the existing helper) to call `core.pricing.suggest_price` so Pi UI + mobile can re-run pricing on demand.
 
 ### 2.3 Database + Pi UI alignment
 
