@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Button,
   FlatList,
   Image,
@@ -48,6 +49,7 @@ const FILTERS: { label: string; value: FilterValue }[] = [
 ];
 
 const PAGE_SIZE = 20;
+const SKELETON_ITEMS = new Array(3).fill(null);
 
 export const DraftListScreen = ({ navigation }: Props) => {
   const { baseUrl, uploadKey } = useServer();
@@ -238,13 +240,19 @@ export const DraftListScreen = ({ navigation }: Props) => {
           ) : null
         }
         ListEmptyComponent={
-          !loading ? (
+          loading ? (
+            <View style={styles.skeletonContainer}>
+              {SKELETON_ITEMS.map((_, idx) => (
+                <SkeletonCard key={idx} />
+              ))}
+            </View>
+          ) : (
             <View style={styles.empty}>
               <Text style={styles.emptyText}>
                 No drafts yet. Tap &quot;Upload photos&quot; to start.
               </Text>
             </View>
-          ) : null
+          )
         }
       />
       <ServerSettingsModal
@@ -281,6 +289,46 @@ const StatusChip = ({ status }: { status?: string }) => {
         {label}
       </Text>
     </View>
+  );
+};
+
+const SkeletonCard = () => {
+  const shimmer = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(shimmer, {
+          toValue: 1,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+        Animated.timing(shimmer, {
+          toValue: 0,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [shimmer]);
+
+  const opacity = shimmer.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.4, 0.85],
+  });
+
+  return (
+    <Animated.View style={[styles.card, styles.skeletonCard, { opacity }]}>
+      <View style={[styles.thumbnailWrapper, styles.skeletonThumb]} />
+      <View style={[styles.cardBody, styles.skeletonBody]}>
+        <View style={styles.skeletonLineWide} />
+        <View style={styles.skeletonLine} />
+        <View style={styles.skeletonLine} />
+        <View style={styles.skeletonPrice} />
+      </View>
+    </Animated.View>
   );
 };
 
@@ -424,5 +472,36 @@ const styles = StyleSheet.create({
   },
   footerText: {
     color: "#9ca3af",
+  },
+  skeletonContainer: {
+    gap: 12,
+  },
+  skeletonCard: {
+    backgroundColor: "#f3f4f6",
+  },
+  skeletonThumb: {
+    backgroundColor: "#e5e7eb",
+  },
+  skeletonBody: {
+    gap: 8,
+    justifyContent: "center",
+  },
+  skeletonLine: {
+    height: 12,
+    backgroundColor: "#d1d5db",
+    borderRadius: 6,
+    width: "60%",
+  },
+  skeletonLineWide: {
+    height: 16,
+    backgroundColor: "#d1d5db",
+    borderRadius: 6,
+    width: "80%",
+  },
+  skeletonPrice: {
+    height: 14,
+    width: "40%",
+    backgroundColor: "#cbd5f5",
+    borderRadius: 6,
   },
 });

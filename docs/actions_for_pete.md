@@ -130,7 +130,7 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [x] M2-06 – Build a price suggestions card that displays low/mid/high and lets the user pick one to set `selected_price`. (2025-11-19 – Draft detail now shows tappable low/mid/high chips that fill the price.)
 - [x] M2-07 – Add pull-to-refresh on the Draft List + Ready List screens using React Native gesture handlers. (2025-11-19 – Draft/Ready filters now share a refresh control gesture on the list.)
 - [x] M2-08 – Implement pagination/infinite scroll for `/api/drafts` results using the backend’s new limit/offset params. (2025-11-19 – Draft list now requests pages via limit/offset and auto-loads more on scroll.)
-- [ ] M2-09 – Create skeleton shimmer placeholders while loading drafts to avoid blank jumps.
+- [x] M2-09 – Create skeleton shimmer placeholders while loading drafts to avoid blank jumps. (2025-11-19 – Draft list now shows animated skeleton cards during initial load.)
 - [ ] M2-10 – Add a Draft Filters sheet (status, brand, size) and pass the selected filters to the API query string.
 - [ ] M2-11 – Display compliance warnings (if provided) on the Draft Detail screen with simple iconography.
 - [ ] M2-12 – Implement inline editing for title/description with optimistic updates and rollback on failure.
