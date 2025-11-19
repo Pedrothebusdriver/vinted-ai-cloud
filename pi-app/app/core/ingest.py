@@ -17,6 +17,8 @@ from app.core.pricing import PricingService
 from app.ocr import OCR
 
 logger = logging.getLogger(__name__)
+_NORMALIZED_TEXT_KEYS = {"brand", "size", "colour", "title", "term", "condition"}
+_NESTED_METADATA_KEYS = {"vinted"}
 
 
 class DraftRejected(Exception):
@@ -104,7 +106,7 @@ class IngestService:
 
         if not filepaths:
             raise DraftRejected(["no_photos"])
-        meta = metadata or {}
+        meta = _normalize_metadata(metadata)
         converted = await self._convert_images(item_id, filepaths)
         allowed = self._filter_compliant(item_id, converted)
         if not allowed:
@@ -401,3 +403,25 @@ def preprocess_for_ocr(img_path: Path) -> Path:
     except Exception as exc:  # pragma: no cover - best effort
         logger.warning("ocr_preprocess_failed", path=str(img_path), error=str(exc))
         return img_path
+def _normalize_metadata(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Return a sanitized copy of the provided metadata payload."""
+    if not isinstance(payload, dict):
+        return {}
+    cleaned: Dict[str, Any] = {}
+    for key, value in payload.items():
+        if isinstance(key, str):
+            key_lower = key.lower()
+            if key_lower in _NORMALIZED_TEXT_KEYS or key_lower in _NESTED_METADATA_KEYS:
+                target_key: Any = key_lower
+            else:
+                target_key = key
+        else:
+            target_key = key
+        if isinstance(value, str):
+            cleaned_value: Any = value.strip()
+        elif isinstance(value, dict):
+            cleaned_value = _normalize_metadata(value)
+        else:
+            cleaned_value = value
+        cleaned[target_key] = cleaned_value
+    return cleaned

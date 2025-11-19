@@ -38,7 +38,7 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [x] M1-02 – Move `_preprocess_for_ocr` from `main.py` into `core/ingest.py` and adjust imports so tests can use it without FastAPI.
 - [x] M1-03 – Create a small logging helper inside `core/ingest.py` (or `core/logging.py`) that standardises structured logs for item IDs and rejection reasons.
 - [x] M1-04 – Add retry/backoff logic around `ocr.read_text` failures, capturing errors via `events.record_event`.
-- [ ] M1-05 – Normalize incoming metadata with a new `sanitize_metadata` function that strips blanks and lowercases expected keys before ingest uses them.
+- [x] M1-05 – Normalize incoming metadata with a new `sanitize_metadata` function that strips blanks and lowercases expected keys before ingest uses them.
 - [ ] M1-06 – Extract colour detection into a dedicated helper returning both the hex value and human label; write at least two unit tests using sample images.
 - [ ] M1-07 – Add dependency-injection hooks so ingest functions accept optional compliance/OCR implementations, making tests easier.
 - [ ] M1-08 – Persist the photo filename that produced the best OCR result into `draft.metadata` and store it inside the DB for debugging.
@@ -128,7 +128,7 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [x] Wire `DraftDetailScreen` edits to `PUT /api/drafts/{id}` with optimistic UI feedback (stubs until backend ships).
 - [x] Update `DraftListScreen` to render thumbnails (once API returns URLs), show status chips (Draft/Ready), and add a simple filter/toggle for each list (2025-11-18 – cards now show thumbnail/brand, chips, and filter toggles).
 - [x] M2-06 – Build a price suggestions card that displays low/mid/high and lets the user pick one to set `selected_price`. (2025-11-19 – Draft detail now shows tappable low/mid/high chips that fill the price.)
-- [ ] M2-07 – Add pull-to-refresh on the Draft List + Ready List screens using React Native gesture handlers.
+- [x] M2-07 – Add pull-to-refresh on the Draft List + Ready List screens using React Native gesture handlers. (2025-11-19 – Draft/Ready filters now share a refresh control gesture on the list.)
 - [ ] M2-08 – Implement pagination/infinite scroll for `/api/drafts` results using the backend’s new limit/offset params.
 - [ ] M2-09 – Create skeleton shimmer placeholders while loading drafts to avoid blank jumps.
 - [ ] M2-10 – Add a Draft Filters sheet (status, brand, size) and pass the selected filters to the API query string.
