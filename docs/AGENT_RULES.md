@@ -1,124 +1,69 @@
-# AGENT RULES – Vinted AI Cloud / FlipLens
+# Agent Rules – How to Behave in This Repo
 
-These rules apply to **all agents** working in this repository.
+This repo belongs to Pete. Pete is a beginner with ADHD and many projects.  
+Your job as an agent is to **reduce** his cognitive load, not increase it.
 
-The main goal right now is to deliver the **FlipLens MVP** as described in `docs/fliplens_prd.md`, using the tasks tracked in `docs/actions_for_pete.md`.
+## 1. Always read the shared context first
 
----
-
-## 1. Always read the shared documents first
-
-On startup, every agent must:
-
-1. Read:
+On each new session:
+1. Read or re-read:
    - `docs/fliplens_prd.md`
    - `docs/actions_for_pete.md`
    - `docs/AGENTS.md`
    - `docs/AGENT_RULES.md`
-2. Identify:
-   - Current milestones and tasks relevant to its own role.
-   - Tasks that are already done vs still open.
+2. Decide which role you are acting as:
+   - AGENT_CORE, AGENT_MOBILE, AGENT_OPS, or AGENT_QA.
+3. From `docs/actions_for_pete.md`, pick the highest-priority unfinished task that matches your role.
 
-Agents should not ask the user to restate the project goals – they live in these docs.
+Do **not** ask Pete “what next?” if the next task is already written down.
 
----
+## 2. Default workflow for any task
 
-## 2. Scope and priorities
+For each task you pick:
 
-1. Primary focus:
-   - FlipLens MVP (Vinted listing assistant for home sellers).
-   - Underlying “Vinted AI Core” on the Pi.
-2. Secondary / parked:
-   - Discord multi-agent relay.
-   - CharityLoop client.
-   - Vinted Pro API integration.
+1. Restate the task in your own words (in the console).
+2. Find the relevant code and docs.
+3. Make a **small, coherent** set of changes focused on that task.
+4. Run appropriate checks:
+   - For backend: relevant tests or at least syntax/import checks.
+5. Update docs if needed (PRD or actions, when behaviour changes).
+6. Commit and push:
+   - Use clear messages like `feat: add ingest skeleton` or `fix: stabilise /api/drafts`.
 
-Agents must **not** start work on secondary items unless:
-- The primary milestone for FlipLens is complete, or
-- `docs/actions_for_pete.md` explicitly lists a secondary task as “Next”.
+Only ask for human input if:
+- You hit a blocker you cannot resolve after reasonable attempts.
+- The task is ambiguous in the docs.
+- The change would be risky (e.g. deleting a lot of code or touching personal system config).
 
----
+## 3. Git & collaboration
 
-## 3. Autonomy vs stopping points
+- Before committing:
+  - Run `git status` and `git diff` to see what changed.
+  - If the branch moved, `git pull --rebase` and resolve small conflicts.
+- Never `git push --force` unless the task explicitly says so.
+- Don’t delete unrelated files “for cleanliness” without a clear reason in the actions doc.
 
-Agents should:
+## 4. Scope & safety boundaries
 
-- **Be proactive**:
-  - Pick the next task that matches their role from `docs/actions_for_pete.md`.
-  - Break big tasks into smaller sub-steps.
-  - Execute them without asking for per-task human approval.
+- Stay within this repo and its documented purpose.
+- Do NOT:
+  - Implement bot-like automatic posting to Vinted for normal users.
+  - Try to log in to Vinted accounts.
+- FlipLens MVP is:
+  - Draft creation
+  - Assisted posting (clipboard + instructions)
 
-- **Stop and ask for human input** when:
-  - A change requires destructive action outside this repo or the Pi project.
-  - A design decision is ambiguous and not covered by `fliplens_prd.md`.
-  - Deploying or restarting critical services on the Pi (`ssh pi-vinted`) if not explicitly requested.
+Future Vinted Pro integrations will be explicitly scoped later.
 
-Rule of thumb: small refactors and internal changes are fine to do autonomously. Anything that might surprise Pete in a scary way should be paused and surfaced.
+## 5. How to report when you’re done
 
----
+When you finish a unit of work:
+- Print a short summary:
+  - Which task you did.
+  - Which files you touched.
+  - Which checks/tests you ran and results.
+  - Any follow-up tasks you noticed.
+- If you added tasks, append them to `docs/actions_for_pete.md` in a clear, numbered way.
 
-## 4. Git and change hygiene
-
-1. Keep commits **small and focused**.
-2. Prefer commit messages like:
-   - `feat(core): scaffold ingest module`
-   - `feat(api): add /api/drafts endpoint`
-   - `chore(docs): update actions for milestone 1`
-3. Before committing:
-   - Run relevant tests (`pytest`, unit tests for affected modules).
-   - Ensure the code at least imports cleanly.
-4. Avoid force pushes unless there is a very strong reason, and never without mentioning it explicitly in the conversation.
-
----
-
-## 5. Coordination via docs
-
-Agents coordinate using the docs instead of constantly asking Pete:
-
-- `docs/actions_for_pete.md`:
-  - The **single source of truth** for what is next.
-  - The PM/Planner agent is responsible for keeping it tidy.
-- `docs/STATUS.md`:
-  - Maintained primarily by the Status / Pete Helper agent.
-  - Contains a human-readable summary of recent work plus a “Ready for Pete to test” section with concrete commands.
-
-When an agent completes a task:
-- Update `docs/actions_for_pete.md`:
-  - Mark the item as done or move it to a “Done” section.
-- Optionally add a brief note to `docs/STATUS.md`.
-
----
-
-## 6. Pi and external systems
-
-- The Pi is reachable via `ssh pi-vinted`.
-- Agents may:
-  - Use `ssh pi-vinted` to inspect logs, check services, or run safe commands **if a task explicitly calls for it**.
-- Agents must **not**:
-  - Reboot the Pi.
-  - Delete large directories.
-  - Change system-wide configuration files.
-
-Any potentially dangerous command on the Pi should be explained before being run so Pete can review.
-
----
-
-## 7. Boundaries
-
-- Stay inside this project unless told otherwise.
-- Do not modify unrelated repositories.
-- Do not automate interactions with Vinted in ways that violate their terms of service. For FlipLens MVP, the product focuses on draft generation and assisted posting, not headless browser automation.
-
----
-
-## 8. When in doubt
-
-If there is a genuine conflict between:
-- What the code currently does,
-- What `docs/fliplens_prd.md` says, and
-- What seems safe,
-
-then:
-1. Prefer to align with `docs/fliplens_prd.md`.
-2. Leave the existing behaviour in place behind a feature flag or config if needed.
-3. Add a short note to `docs/STATUS.md` and ask Pete for a decision in the chat.
+Assume autonomy by default.  
+Pete will review GitHub and logs when he has time.
