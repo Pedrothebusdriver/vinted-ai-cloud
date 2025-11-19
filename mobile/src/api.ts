@@ -32,10 +32,19 @@ const buildHeaders = (
   return headers;
 };
 
-const buildDraftQuery = (filters?: DraftListFilters) => {
+const buildDraftQuery = (
+  filters?: DraftListFilters,
+  pagination?: DraftListPagination
+) => {
   const params = new URLSearchParams();
   if (filters?.status) {
     params.append("status", filters.status);
+  }
+  if (pagination?.limit != null) {
+    params.append("limit", String(pagination.limit));
+  }
+  if (pagination?.offset != null) {
+    params.append("offset", String(pagination.offset));
   }
   const query = params.toString();
   return query ? `?${query}` : "";
@@ -167,6 +176,11 @@ export type DraftListFilters = {
   status?: DraftStatus;
 };
 
+export type DraftListPagination = {
+  limit?: number;
+  offset?: number;
+};
+
 const resolveThumbnail = (row: any) => {
   if (row.thumbnail_url || row.thumbnail) return row.thumbnail_url || row.thumbnail;
   if (Array.isArray(row.photos) && row.photos.length > 0) {
@@ -211,10 +225,13 @@ const normalizeDraftSummary = (row: any, base?: string): DraftSummary => {
 
 export async function fetchDrafts(
   serverBase: string | undefined,
-  options?: { filters?: DraftListFilters } & RequestOptions
+  options?: {
+    filters?: DraftListFilters;
+    pagination?: DraftListPagination;
+  } & RequestOptions
 ): Promise<DraftSummary[]> {
   const base = normalizeBase(serverBase);
-  const query = buildDraftQuery(options?.filters);
+  const query = buildDraftQuery(options?.filters, options?.pagination);
   const res = await fetch(`${base}/api/drafts${query}`, {
     headers: buildHeaders(options?.uploadKey),
   });

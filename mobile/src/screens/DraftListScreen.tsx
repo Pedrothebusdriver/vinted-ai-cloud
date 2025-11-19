@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Button,
@@ -47,49 +47,99 @@ const FILTERS: { label: string; value: FilterValue }[] = [
   { label: "Ready", value: "ready" },
 ];
 
+const PAGE_SIZE = 20;
+
 export const DraftListScreen = ({ navigation }: Props) => {
   const { baseUrl, uploadKey } = useServer();
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterValue>("all");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const draftsRef = useRef<DraftSummary[]>([]);
+  const hasMoreRef = useRef(true);
 
-  const loadDrafts = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const filters = filter === "all" ? undefined : { status: filter };
-      const data = await fetchDrafts(baseUrl, {
-        filters,
-        uploadKey,
-      });
-      setDrafts(data);
-    } catch (err: any) {
-      setError(err.message || "Unable to load drafts, showing samples.");
-      setDrafts(
-        filter === "all"
-          ? PLACEHOLDER_DRAFTS
-          : PLACEHOLDER_DRAFTS.filter((draft) => draft.status === filter)
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [baseUrl, filter, uploadKey]);
+  const loadDrafts = useCallback(
+    async ({ append = false }: { append?: boolean } = {}) => {
+      if (append && !hasMoreRef.current) {
+        return;
+      }
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+        setError(null);
+      }
+      try {
+        const filters = filter === "all" ? undefined : { status: filter };
+        const offset = append ? draftsRef.current.length : 0;
+        const data = await fetchDrafts(baseUrl, {
+          filters,
+          uploadKey,
+          pagination: {
+            limit: PAGE_SIZE,
+            offset,
+          },
+        });
+        setDrafts((prev) => (append ? [...prev, ...data] : data));
+        setHasMore(data.length === PAGE_SIZE);
+      } catch (err: any) {
+        const fallbackMessage = err.message || "Unable to load drafts.";
+        setError(
+          append
+            ? `${fallbackMessage} Pull to refresh to try again.`
+            : `${fallbackMessage} Showing samples.`
+        );
+        if (!append) {
+          setDrafts(
+            filter === "all"
+              ? PLACEHOLDER_DRAFTS
+              : PLACEHOLDER_DRAFTS.filter((draft) => draft.status === filter)
+          );
+          setHasMore(false);
+        }
+      } finally {
+        if (append) {
+          setLoadingMore(false);
+        } else {
+          setLoading(false);
+        }
+      }
+    },
+    [baseUrl, filter, uploadKey]
+  );
+
 
   useEffect(() => {
+    draftsRef.current = drafts;
+  }, [drafts]);
+
+  useEffect(() => {
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
+
+  useEffect(() => {
+    setHasMore(true);
+    hasMoreRef.current = true;
     loadDrafts();
-  }, [loadDrafts]);
+  }, [filter, loadDrafts]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await loadDrafts();
+      await loadDrafts({ append: false });
     } finally {
       setRefreshing(false);
     }
   }, [loadDrafts]);
+
+  const onEndReached = useCallback(() => {
+    if (loading || loadingMore) return;
+    loadDrafts({ append: true });
+  }, [loadDrafts, loading, loadingMore]);
 
   const renderItem = ({ item }: { item: DraftSummary }) => (
     <TouchableOpacity
@@ -173,6 +223,19 @@ export const DraftListScreen = ({ navigation }: Props) => {
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        onEndReached={onEndReached}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={
+          loadingMore || !hasMore ? (
+            <View style={styles.footer}>
+              {loadingMore ? (
+                <ActivityIndicator />
+              ) : (
+                <Text style={styles.footerText}>No more drafts.</Text>
+              )}
+            </View>
+          ) : null
         }
         ListEmptyComponent={
           !loading ? (
@@ -354,5 +417,12 @@ const styles = StyleSheet.create({
   emptyText: {
     color: "#6b7280",
     textAlign: "center",
+  },
+  footer: {
+    paddingVertical: 20,
+    alignItems: "center",
+  },
+  footerText: {
+    color: "#9ca3af",
   },
 });
