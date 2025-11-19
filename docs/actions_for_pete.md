@@ -40,7 +40,7 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [x] M1-04 – Add retry/backoff logic around `ocr.read_text` failures, capturing errors via `events.record_event`.
 - [x] M1-05 – Normalize incoming metadata with a new `sanitize_metadata` function that strips blanks and lowercases expected keys before ingest uses them.
 - [x] M1-06 – Extract colour detection into a dedicated helper returning both the hex value and human label; write at least two unit tests using sample images.
-- [ ] M1-07 – Add dependency-injection hooks so ingest functions accept optional compliance/OCR implementations, making tests easier.
+- [x] M1-07 – Add dependency-injection hooks so ingest functions accept optional compliance/OCR implementations, making tests easier.
 - [ ] M1-08 – Persist the photo filename that produced the best OCR result into `draft.metadata` and store it inside the DB for debugging.
 - [ ] M1-09 – Detect duplicate photos (perceptual hash) during ingest and auto-drop duplicates before compliance/OCR.
 - [ ] M1-10 – Encapsulate `learned_labels` lookups + writes in a helper within `core/ingest.py` and add docstrings for future ML tweaks.

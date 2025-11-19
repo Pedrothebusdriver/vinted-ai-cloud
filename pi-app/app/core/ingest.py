@@ -77,6 +77,7 @@ class IngestService:
         convert_semaphore: Optional[asyncio.Semaphore] = None,
         ocr_max_attempts: int = 3,
         ocr_retry_delay: float = 0.2,
+        compliance_checker: Callable[[Path], Tuple[bool, str]] = compliance.check_image,
     ) -> None:
         self._ocr = ocr
         self._pricing = pricing_service
@@ -94,6 +95,7 @@ class IngestService:
         self._sem = convert_semaphore or asyncio.Semaphore(1)
         self._ocr_max_attempts = max(1, ocr_max_attempts)
         self._ocr_retry_delay = max(0.0, ocr_retry_delay)
+        self._compliance_checker = compliance_checker
 
     async def build_draft(
         self,
@@ -235,7 +237,7 @@ class IngestService:
         allowed: List[ProcessedPhoto] = []
         rejected: List[str] = []
         for photo in photos:
-            ok, reason = compliance.check_image(photo.optimised)
+            ok, reason = self._compliance_checker(photo.optimised)
             if ok:
                 allowed.append(photo)
             else:
