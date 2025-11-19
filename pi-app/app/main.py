@@ -870,6 +870,9 @@ async def _store_ingest_result(item_id: int, draft: Draft, *, started_at: float)
             attr_rows.append(("category_id", draft.category_id, "Auto"))
         if draft.category_name:
             attr_rows.append(("category_name", draft.category_name, "Auto"))
+        ocr_photo = draft.metadata.get("ocr_best_photo")
+        if ocr_photo:
+            attr_rows.append(("ocr_best_photo", ocr_photo, "Auto"))
         for field, value, confidence in attr_rows:
                 c.execute(
                     'insert or replace into attributes(item_id, field, value, confidence) values (?,?,?,?)',

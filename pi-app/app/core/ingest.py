@@ -115,7 +115,7 @@ class IngestService:
             self._log_event("photos_rejected", level="warning", item_id=item_id)
             raise DraftRejected(["non_compliant"])
 
-        label_text, label_hash = self._read_label_text(item_id, allowed)
+        label_text, label_hash, best_photo = self._read_label_text(item_id, allowed)
         brand, brand_conf, size, size_conf = self._detect_from_sources(
             label_text=label_text,
             filepaths=filepaths,
@@ -171,6 +171,8 @@ class IngestService:
             "raw_metadata": meta,
             "item_type": item_type,
         }
+        if best_photo:
+            draft.metadata["ocr_best_photo"] = str(best_photo.optimised)
         draft.photos = [
             DraftPhoto(
                 path=str(photo.optimised),
@@ -277,17 +279,23 @@ class IngestService:
         except Exception as exc:  # pragma: no cover - best effort logging
             logger.debug("thumb_placeholder_failed", error=str(exc))
 
-    def _read_label_text(self, item_id: int, photos: Sequence[ProcessedPhoto]) -> Tuple[str, Optional[str]]:
+    def _read_label_text(
+        self,
+        item_id: int,
+        photos: Sequence[ProcessedPhoto],
+    ) -> Tuple[str, Optional[str], Optional[ProcessedPhoto]]:
         """Read OCR text from the best available photo and compute label hash."""
         best_score, best_text = -1, ""
+        best_photo: Optional[ProcessedPhoto] = None
         for photo in photos:
             prep = self._preprocess_for_ocr(photo.optimised)
             text = self._run_ocr_with_retry(item_id, prep)
             score = sum(ch.isalnum() for ch in text)
             if score > best_score:
                 best_score, best_text = score, text
+                best_photo = photo
         label_hash = self._label_hash(best_text) if best_text else None
-        return best_text, label_hash
+        return best_text, label_hash, best_photo
 
     def _run_ocr_with_retry(self, item_id: int, img_path: Path) -> str:
         """Call OCR with retries/backoff, logging failures along the way."""
