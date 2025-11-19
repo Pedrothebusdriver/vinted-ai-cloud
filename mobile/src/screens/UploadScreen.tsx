@@ -8,12 +8,17 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import * as ImagePicker from "expo-image-picker";
-import { uploadImages, UploadFileInput } from "../api";
+import {
+  createDraftFromUpload,
+  UploadFileInput,
+  DraftDetail,
+} from "../api";
 import { useServer } from "../state/ServerContext";
 import { RootStackParamList } from "../navigation/types";
 
@@ -28,7 +33,9 @@ type LocalAsset = {
 export const UploadScreen = ({ navigation }: Props) => {
   const { baseUrl, uploadKey } = useServer();
   const [assets, setAssets] = useState<LocalAsset[]>([]);
-  const [metadata, setMetadata] = useState("");
+  const [brand, setBrand] = useState("");
+  const [size, setSize] = useState("");
+  const [condition, setCondition] = useState("good");
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -94,10 +101,31 @@ export const UploadScreen = ({ navigation }: Props) => {
     }
   }, []);
 
-  const clearSelection = useCallback(() => {
+  const clearForm = useCallback(() => {
     setAssets([]);
+    setBrand("");
+    setSize("");
+    setCondition("good");
     setStatus(null);
   }, []);
+
+  const metadataPayload = useMemo(() => {
+    const payload: Record<string, string> = {};
+    if (brand.trim()) payload.brand = brand.trim();
+    if (size.trim()) payload.size = size.trim();
+    if (condition.trim()) payload.condition = condition.trim();
+    return Object.keys(payload).length ? JSON.stringify(payload) : undefined;
+  }, [brand, condition, size]);
+
+  const extractDraftId = (response: DraftDetail | any) => {
+    if (!response) return undefined;
+    return (
+      response.id ??
+      response.draft_id ??
+      response.item_id ??
+      response.draft?.id
+    );
+  };
 
   const onUpload = useCallback(async () => {
     if (!files.length) {
@@ -107,21 +135,21 @@ export const UploadScreen = ({ navigation }: Props) => {
     setPending(true);
     setStatus(null);
     try {
-      const response = await uploadImages(
+      const response = await createDraftFromUpload(
         baseUrl,
         files,
-        metadata.trim() || undefined,
+        metadataPayload,
         { uploadKey }
       );
-      const newId = response?.item_id;
-      setStatus("Upload complete. Opening draft...");
+      const newId = extractDraftId(response);
+      setStatus("Draft created. Opening editor...");
       if (newId) {
         navigation.navigate("DraftDetail", { id: newId });
-        clearSelection();
+        clearForm();
       } else {
         Alert.alert(
           "Uploaded",
-          "Photos uploaded. Refresh the Drafts list to see the new item."
+          "Draft created. Refresh the Drafts list to see it."
         );
       }
     } catch (err: any) {
@@ -129,16 +157,23 @@ export const UploadScreen = ({ navigation }: Props) => {
     } finally {
       setPending(false);
     }
-  }, [baseUrl, clearSelection, files, metadata, navigation, uploadKey]);
+  }, [
+    baseUrl,
+    clearForm,
+    files,
+    metadataPayload,
+    navigation,
+    uploadKey,
+  ]);
 
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.heading}>Upload photos</Text>
         <Text style={styles.description}>
-          We send selected photos to <Text style={styles.code}>/api/upload</Text>{" "}
-          for now. Once <Text style={styles.code}>POST /api/drafts</Text> ships,
-          this screen will reuse the same payload builder.
+          Select photos and send them to{" "}
+          <Text style={styles.code}>POST /api/drafts</Text>. We&apos;ll send the
+          stored upload key automatically.
         </Text>
         <View style={styles.buttonRow}>
           <Button title="Pick from library" onPress={pickImages} />
@@ -162,18 +197,48 @@ export const UploadScreen = ({ navigation }: Props) => {
           </View>
         )}
         <View style={styles.field}>
-          <Text style={styles.label}>Metadata (JSON)</Text>
+          <Text style={styles.label}>Brand</Text>
           <TextInput
-            style={[styles.input, styles.multiline]}
-            multiline
-            numberOfLines={4}
-            value={metadata}
-            onChangeText={setMetadata}
-            placeholder='{"brand":"Nike","size":"M"}'
+            style={styles.input}
+            value={brand}
+            onChangeText={setBrand}
+            placeholder="Nike"
           />
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Size</Text>
+          <TextInput
+            style={styles.input}
+            value={size}
+            onChangeText={setSize}
+            placeholder="M / UK 10 / W32"
+          />
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Condition</Text>
+          <View style={styles.chipRow}>
+            {CONDITION_OPTIONS.map((option) => (
+              <TouchableOpacity
+                key={option.value}
+                style={[
+                  styles.chip,
+                  condition === option.value && styles.chipActive,
+                ]}
+                onPress={() => setCondition(option.value)}
+              >
+                <Text
+                  style={[
+                    styles.chipText,
+                    condition === option.value && styles.chipTextActive,
+                  ]}
+                >
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
           <Text style={styles.helper}>
-            Temporary helper until we wire simple inputs; the backend expects
-            JSON with brand/size/condition for now.
+            These values get sent to the draft builder as JSON metadata.
           </Text>
         </View>
         {pending && <ActivityIndicator style={{ marginBottom: 12 }} />}
@@ -184,12 +249,23 @@ export const UploadScreen = ({ navigation }: Props) => {
             onPress={onUpload}
             disabled={pending || files.length === 0}
           />
-          <Button title="Clear" onPress={clearSelection} disabled={!assets.length} />
+          <Button
+            title="Clear"
+            onPress={clearForm}
+            disabled={!assets.length && !brand && !size}
+          />
         </View>
       </ScrollView>
     </SafeAreaView>
   );
 };
+
+const CONDITION_OPTIONS = [
+  { label: "New", value: "new" },
+  { label: "Excellent", value: "excellent" },
+  { label: "Good", value: "good" },
+  { label: "Fair", value: "fair" },
+];
 
 const styles = StyleSheet.create({
   safe: {
@@ -248,10 +324,6 @@ const styles = StyleSheet.create({
     padding: 12,
     fontSize: 16,
   },
-  multiline: {
-    minHeight: 100,
-    textAlignVertical: "top",
-  },
   helper: {
     color: "#6b7280",
   },
@@ -260,5 +332,28 @@ const styles = StyleSheet.create({
     backgroundColor: "#d1fae5",
     padding: 10,
     borderRadius: 8,
+  },
+  chipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  chip: {
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+  },
+  chipActive: {
+    backgroundColor: "#111827",
+    borderColor: "#111827",
+  },
+  chipText: {
+    color: "#374151",
+    fontWeight: "600",
+  },
+  chipTextActive: {
+    color: "#fff",
   },
 });
