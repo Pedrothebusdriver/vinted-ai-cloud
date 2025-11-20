@@ -19,6 +19,7 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [x] PRD lives at `docs/fliplens_prd.md` (updated 17 Nov).
 - [x] Pi FastAPI already exposes `GET /health` with status + git version (`pi-app/app/main.py`).
 - [x] Expo app scaffolded under `mobile/` with Connect, Draft list, and Upload screens hitting `/health`, `/api/drafts`, and `/api/upload`.
+- [x] Ensure Connect screen Continue button stays visible: sticky safe-area-aware footer keeps the button reachable when scrolling or with keyboard open (Nov 20).
 
 ---
 

@@ -11,7 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { fetchHealth } from "../api";
 import { Config } from "../config";
@@ -33,6 +33,7 @@ export const ConnectScreen = ({ navigation }: Props) => {
     selectServer,
     hydrated,
   } = useServer();
+  const insets = useSafeAreaInsets();
   const [url, setUrl] = useState(baseUrl);
   const [key, setKey] = useState(uploadKey || "");
   const [status, setStatus] = useState<"idle" | "ok" | "error">("idle");
@@ -116,126 +117,151 @@ export const ConnectScreen = ({ navigation }: Props) => {
   const versionMismatch =
     !!serverVersion && serverVersion !== Config.coreSchemaVersion;
 
+  const footerInset = Math.max(insets.bottom, 12);
+  const contentPaddingBottom = footerInset + 120;
+
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView
-        contentContainerStyle={styles.container}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        <Text style={styles.heading}>FlipLens server</Text>
-        <Text style={styles.description}>
-          Enter the Pi or Core server URL. We&apos;ll remember this for uploads
-          and drafts.
-        </Text>
-        <TextInput
-          style={styles.input}
-          value={url}
-          onChangeText={setUrl}
-          autoCapitalize="none"
-          autoCorrect={false}
-          placeholder="http://192.168.0.10:8080"
-        />
-        <Button
-          title={pending ? "Checking..." : "Test Connection"}
-          onPress={testConnection}
-          disabled={pending}
-        />
-        {pending && <ActivityIndicator style={{ marginTop: 12 }} />}
-        {status !== "idle" && (
-          <Text
-            style={[styles.status, status === "ok" ? styles.ok : styles.error]}
-          >
-            {message}
+      <View style={styles.body}>
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[
+            styles.container,
+            { paddingBottom: contentPaddingBottom },
+          ]}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
+          <Text style={styles.heading}>FlipLens server</Text>
+          <Text style={styles.description}>
+            Enter the Pi or Core server URL. We&apos;ll remember this for
+            uploads and drafts.
           </Text>
-        )}
-        {serverVersion && (
-          <Text
-            style={[
-              styles.version,
-              versionMismatch && styles.versionWarning,
-            ]}
-          >
-            Server version: {serverVersion} · Expected:{" "}
-            {Config.coreSchemaVersion}
-          </Text>
-        )}
-        <Button
-          title="Save this server"
-          onPress={onSaveServer}
-          disabled={!cleanUrl && !baseUrl}
-        />
-        <View style={styles.field}>
-          <Text style={styles.label}>Upload key (optional)</Text>
           <TextInput
             style={styles.input}
-            value={key}
-            onChangeText={setKey}
+            value={url}
+            onChangeText={setUrl}
             autoCapitalize="none"
             autoCorrect={false}
-            placeholder="upload-secret"
+            placeholder="http://192.168.0.10:8080"
           />
-          <Text style={styles.helper}>
-            We send this as <Text style={styles.code}>X-Upload-Key</Text> on
-            every request once the server enforces auth.
-          </Text>
-        </View>
-        <View style={styles.divider} />
-        {lastConnectedLabel && (
-          <Text style={styles.meta}>
-            Last connected: {lastConnectedLabel}
-          </Text>
-        )}
-        {servers.length > 0 && (
-          <View style={styles.savedList}>
-            <Text style={styles.savedHeading}>Saved servers</Text>
-            {servers.map((server) => {
-              let label = server.label || server.baseUrl;
-              let savedLast: string | null = null;
-              if (server.lastConnected) {
-                try {
-                  savedLast = new Date(server.lastConnected).toLocaleString();
-                } catch {
-                  savedLast = server.lastConnected;
-                }
-              }
-              const isActive =
-                server.baseUrl === baseUrl &&
-                (server.uploadKey || null) === (uploadKey || null);
-              return (
-                <TouchableOpacity
-                  key={server.id}
-                  style={[
-                    styles.savedCard,
-                    isActive && styles.savedCardActive,
-                  ]}
-                  onPress={() => selectServer(server.id)}
-                >
-                  <Text style={styles.savedLabel}>{label}</Text>
-                  <Text style={styles.savedUrl}>{server.baseUrl}</Text>
-                  {savedLast && (
-                    <Text style={styles.savedMeta}>
-                      Last connected: {savedLast}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
+          <Button
+            title={pending ? "Checking..." : "Test Connection"}
+            onPress={testConnection}
+            disabled={pending}
+          />
+          {pending && <ActivityIndicator style={{ marginTop: 12 }} />}
+          {status !== "idle" && (
+            <Text
+              style={[
+                styles.status,
+                status === "ok" ? styles.ok : styles.error,
+              ]}
+            >
+              {message}
+            </Text>
+          )}
+          {serverVersion && (
+            <Text
+              style={[
+                styles.version,
+                versionMismatch && styles.versionWarning,
+              ]}
+            >
+              Server version: {serverVersion} · Expected:{" "}
+              {Config.coreSchemaVersion}
+            </Text>
+          )}
+          <Button
+            title="Save this server"
+            onPress={onSaveServer}
+            disabled={!cleanUrl && !baseUrl}
+          />
+          <View style={styles.field}>
+            <Text style={styles.label}>Upload key (optional)</Text>
+            <TextInput
+              style={styles.input}
+              value={key}
+              onChangeText={setKey}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="upload-secret"
+            />
+            <Text style={styles.helper}>
+              We send this as <Text style={styles.code}>X-Upload-Key</Text> on
+              every request once the server enforces auth.
+            </Text>
           </View>
-        )}
-        <Button
-          title="Continue"
-          onPress={proceed}
-          disabled={!hydrated || pending}
-        />
-      </ScrollView>
+          <View style={styles.divider} />
+          {lastConnectedLabel && (
+            <Text style={styles.meta}>
+              Last connected: {lastConnectedLabel}
+            </Text>
+          )}
+          {servers.length > 0 && (
+            <View style={styles.savedList}>
+              <Text style={styles.savedHeading}>Saved servers</Text>
+              {servers.map((server) => {
+                let label = server.label || server.baseUrl;
+                let savedLast: string | null = null;
+                if (server.lastConnected) {
+                  try {
+                    savedLast = new Date(server.lastConnected).toLocaleString();
+                  } catch {
+                    savedLast = server.lastConnected;
+                  }
+                }
+                const isActive =
+                  server.baseUrl === baseUrl &&
+                  (server.uploadKey || null) === (uploadKey || null);
+                return (
+                  <TouchableOpacity
+                    key={server.id}
+                    style={[
+                      styles.savedCard,
+                      isActive && styles.savedCardActive,
+                    ]}
+                    onPress={() => selectServer(server.id)}
+                  >
+                    <Text style={styles.savedLabel}>{label}</Text>
+                    <Text style={styles.savedUrl}>{server.baseUrl}</Text>
+                    {savedLast && (
+                      <Text style={styles.savedMeta}>
+                        Last connected: {savedLast}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+        </ScrollView>
+        <View
+          style={[
+            styles.footer,
+            {
+              paddingBottom: footerInset,
+            },
+          ]}
+        >
+          <Button
+            title="Continue"
+            onPress={proceed}
+            disabled={!hydrated || pending}
+          />
+        </View>
+      </View>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   safe: {
+    flex: 1,
+    backgroundColor: "#fff",
+  },
+  body: {
     flex: 1,
     backgroundColor: "#fff",
   },
@@ -331,5 +357,20 @@ const styles = StyleSheet.create({
       default: "monospace",
     }),
     fontWeight: "600",
+  },
+  footer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderColor: "#e5e7eb",
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: -2 },
   },
 });
