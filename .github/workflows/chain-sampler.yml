@@ -1,7 +1,7 @@
 name: Sampler Auto Chain
 on:
   workflow_run:
-    workflows: ["Sampler (Openverse) — Commit Manifest"]
+    workflows: ["Sampler (dataset) — Commit Manifest"]
     types: [completed]
 
 jobs:

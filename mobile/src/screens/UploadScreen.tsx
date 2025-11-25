@@ -37,6 +37,7 @@ export const UploadScreen = ({ navigation }: Props) => {
   const [size, setSize] = useState("");
   const [condition, setCondition] = useState("good");
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
   const files = useMemo<UploadFileInput[]>(
@@ -107,6 +108,7 @@ export const UploadScreen = ({ navigation }: Props) => {
     setSize("");
     setCondition("good");
     setStatus(null);
+    setError(null);
   }, []);
 
   const metadataPayload = useMemo(() => {
@@ -132,8 +134,13 @@ export const UploadScreen = ({ navigation }: Props) => {
       Alert.alert("Add photos", "Select at least one photo to upload.");
       return;
     }
+    if (!baseUrl?.trim()) {
+      Alert.alert("Connect to server", "Add the server URL on the Connect tab first.");
+      return;
+    }
     setPending(true);
     setStatus(null);
+    setError(null);
     try {
       const response = await createDraftFromUpload(
         baseUrl,
@@ -153,7 +160,9 @@ export const UploadScreen = ({ navigation }: Props) => {
         );
       }
     } catch (err: any) {
-      Alert.alert("Upload failed", err?.message || "Unable to upload photos.");
+      const message = err?.message || "Unable to upload photos.";
+      setError(message);
+      Alert.alert("Upload failed", message);
     } finally {
       setPending(false);
     }
@@ -242,6 +251,7 @@ export const UploadScreen = ({ navigation }: Props) => {
           </Text>
         </View>
         {pending && <ActivityIndicator style={{ marginBottom: 12 }} />}
+        {error && <Text style={styles.error}>{error}</Text>}
         {status && <Text style={styles.status}>{status}</Text>}
         <View style={styles.buttonRow}>
           <Button
@@ -330,6 +340,12 @@ const styles = StyleSheet.create({
   status: {
     color: "#065f46",
     backgroundColor: "#d1fae5",
+    padding: 10,
+    borderRadius: 8,
+  },
+  error: {
+    color: "#991b1b",
+    backgroundColor: "#fef2f2",
     padding: 10,
     borderRadius: 8,
   },

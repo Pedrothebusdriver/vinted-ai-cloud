@@ -55,6 +55,7 @@ export const DraftDetailScreen = ({ route }: Props) => {
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
   const [status, setStatus] = useState<DraftStatus>("draft");
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
 
   const priceValue = useMemo(() => {
     if (draft?.selected_price) return draft.selected_price;
@@ -139,24 +140,31 @@ export const DraftDetailScreen = ({ route }: Props) => {
 
   const onPostHelper = useCallback(async () => {
     if (!draft) return;
+    setCopyMessage(null);
     const priceDisplay = price.trim()
       ? price.trim()
       : priceValue
       ? String(priceValue)
       : "";
-    const helperText = `${title || draft.title}\n\n${description || draft.description || ""}\n\nPrice: ${
-      priceDisplay ? `£${priceDisplay}` : "TBD"
-    }`;
-    await Clipboard.setStringAsync(helperText.trim());
-    const deepLink = "vinted://items/new";
-    const supported = await Linking.canOpenURL(deepLink);
-    if (supported) {
-      await Linking.openURL(deepLink);
-    } else {
-      Alert.alert(
-        "Copied to clipboard",
-        "We copied the listing text. Open the Vinted app, tap the + button, and paste the details into your draft."
-      );
+    const helperText = `${title || draft.title}\n\n${
+      description || draft.description || ""
+    }\n\nPrice: ${priceDisplay ? `£${priceDisplay}` : "TBD"}`.trim();
+    try {
+      await Clipboard.setStringAsync(helperText);
+      const deepLink = "vinted://items/new";
+      const supported = await Linking.canOpenURL(deepLink);
+      if (supported) {
+        await Linking.openURL(deepLink);
+        setCopyMessage("Copied listing text. Opening Vinted...");
+      } else {
+        Alert.alert(
+          "Copied to clipboard",
+          "We copied the listing text. Open the Vinted app, tap the + button, and paste the details into your draft. If Vinted isn't installed, install it from the App Store first."
+        );
+        setCopyMessage("Copied listing text for manual paste into Vinted.");
+      }
+    } catch (err: any) {
+      Alert.alert("Clipboard failed", err?.message || "Unable to copy listing text.");
     }
   }, [description, draft, price, priceValue, title]);
 
@@ -186,7 +194,12 @@ export const DraftDetailScreen = ({ route }: Props) => {
     <ActivityIndicator style={{ marginTop: 40 }} />
   ) : (
     <ScrollView contentContainerStyle={styles.scroll}>
-      {error && <Text style={styles.error}>{error}</Text>}
+      {error && (
+        <View style={styles.errorBlock}>
+          <Text style={styles.error}>{error}</Text>
+          <Button title="Retry" onPress={loadDraft} />
+        </View>
+      )}
       {draft?.photos?.length ? (
         <ScrollView horizontal contentContainerStyle={styles.photos}>
           {draft.photos.map((photo) => (
@@ -320,6 +333,7 @@ export const DraftDetailScreen = ({ route }: Props) => {
         />
         <View style={{ height: 12 }} />
         <Button title="Post to Vinted" onPress={onPostHelper} />
+        {copyMessage && <Text style={styles.helper}>{copyMessage}</Text>}
         <Text style={styles.helper}>
           Copies the title, description, and price to your clipboard, then opens
           (or reminds you to open) the Vinted app so you can paste the details.
@@ -401,6 +415,9 @@ const styles = StyleSheet.create({
     color: "#991b1b",
     padding: 12,
     borderRadius: 8,
+  },
+  errorBlock: {
+    gap: 8,
   },
   statusRow: {
     flexDirection: "row",

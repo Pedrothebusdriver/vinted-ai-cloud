@@ -60,4 +60,5 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           echo "Would kick fine-tune job here using ./pack/*.zip"
+          echo "TODO: call openai api fine_tuning.jobs.create with the pack once pricing/labels are final"
           echo "Training stub complete."

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import hashlib
 import json
 import logging
@@ -1180,6 +1181,53 @@ def get_draft_detail(draft_id: int):
         raise HTTPException(status_code=404, detail="Draft not found")
     return payload
 
+
+@app.get('/api/drafts/{draft_id}/export')
+def export_draft_payload(draft_id: int):
+    draft = _load_draft_payload(draft_id, include_photos=True)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+
+    prices = draft.get("prices", {})
+    selected_price = prices.get("selected") or prices.get("mid")
+
+    attribute_lines = []
+    for label, value in [
+        ("Brand", draft.get("brand")),
+        ("Size", draft.get("size")),
+        ("Colour", draft.get("colour")),
+        ("Condition", draft.get("condition")),
+        ("Category", draft.get("category_name") or draft.get("category_id")),
+    ]:
+        if value:
+            attribute_lines.append(f"{label}: {value}")
+
+    base_description = (draft.get("description") or "").strip()
+    export_description_parts = [base_description] if base_description else []
+    export_description_parts.extend(attribute_lines)
+    export_description = "\n".join(part for part in export_description_parts if part).strip()
+
+    return {
+        "id": draft_id,
+        "title": draft["title"],
+        "description": base_description,
+        "category": draft.get("category_name") or draft.get("category_id"),
+        "condition": draft.get("condition"),
+        "brand": draft.get("brand"),
+        "size": draft.get("size"),
+        "colour": draft.get("colour"),
+        "price": selected_price,
+        "price_low": prices.get("low"),
+        "price_mid": prices.get("mid"),
+        "price_high": prices.get("high"),
+        "photos": draft.get("photos", []),
+        "clipboard": {
+            "title": draft["title"],
+            "description": export_description,
+            "price": selected_price,
+        },
+    }
+
 @app.put('/api/drafts/{draft_id}', response_model=DraftResponseSchema)
 async def update_draft_api(draft_id: int, payload: DraftUpdatePayload):
     updates: Dict[str, Any] = {}
@@ -1216,6 +1264,104 @@ async def update_draft_api(draft_id: int, payload: DraftUpdatePayload):
         raise HTTPException(status_code=404, detail="Draft not found")
     return payload
 
+async def _call_openai_inference(jpeg_path: Path) -> Optional[Dict[str, Any]]:
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return None
+
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=api_key)
+    model = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
+
+    encoded = base64.b64encode(jpeg_path.read_bytes()).decode("utf-8")
+    system_prompt = (
+        "You are FlipLens vision. Inspect the clothing photo and reply with concise JSON "
+        "fields: brand, size, colour, category, condition, price_low, price_mid, price_high. "
+        "Prices must be GBP numbers without currency symbols. Use null if unsure."
+    )
+
+    completion = await client.chat.completions.create(
+        model=model,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Return only the JSON object with the required keys."},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}},
+                ],
+            },
+        ],
+        max_tokens=300,
+    )
+    content = completion.choices[0].message.content or "{}"
+    try:
+        cleaned = content.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.strip("`\n ")
+        payload = json.loads(cleaned)
+    except Exception as exc:
+        log.warning("infer_openai_parse_failed", error=str(exc))
+        return None
+
+    return {
+        "brand": payload.get("brand"),
+        "size": payload.get("size"),
+        "colour": payload.get("colour"),
+        "category": payload.get("category"),
+        "condition": payload.get("condition") or "Good",
+        "price_low": _coerce_float(payload.get("price_low")),
+        "price_mid": _coerce_float(payload.get("price_mid")),
+        "price_high": _coerce_float(payload.get("price_high")),
+        "source": "openai",  # helps eval report
+    }
+
+
+async def _heuristic_inference(jpeg_path: Path, filename: str, fast_mode: bool) -> Dict[str, Any]:
+    if fast_mode:
+        label_text = ""
+        brand = size = None
+    else:
+        label_text = await asyncio.to_thread(ocr.read_text, jpeg_path)
+        brand, _, size, _ = detect_brand_size(label_text)
+    name_hint = filename or label_text or "clothing"
+    colour = await asyncio.to_thread(dominant_colour, jpeg_path)
+    item_type, _ = item_type_from_name(name_hint)
+
+    price_estimate = await pricing_service.suggest_price(
+        brand=brand,
+        category=item_type,
+        size=size,
+        colour=colour,
+        condition="Good",
+    )
+
+    return {
+        "brand": (brand or "").strip() or None,
+        "size": (size or "").strip() or None,
+        "colour": colour,
+        "category": item_type,
+        "condition": "Good",
+        "price_low": price_estimate.low,
+        "price_mid": price_estimate.mid,
+        "price_high": price_estimate.high,
+        "label_text": label_text,
+        "source": "fallback",
+    }
+
+
+def _coerce_float(value: Any) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        number = float(value)
+        return number
+    except (TypeError, ValueError):
+        return None
+
+
 @app.post('/api/infer')
 async def infer_image(request: Request, file: UploadFile = File(...)):
     if file is None:
@@ -1237,47 +1383,28 @@ async def infer_image(request: Request, file: UploadFile = File(...)):
 
     fast_mode = str(request.query_params.get("fast", "0")).lower() in {"1", "true", "yes"}
 
-    if fast_mode:
-        label_text = ""
-        brand = size = None
-        bconf = sconf = 'Low'
-    else:
-        label_text = await asyncio.to_thread(ocr.read_text, jpeg_path)
-        brand, bconf, size, sconf = detect_brand_size(label_text)
-    name_hint = file.filename or label_text or "clothing"
-    colour = await asyncio.to_thread(dominant_colour, jpeg_path)
-    item_type, iconf = item_type_from_name(name_hint)
+    prediction: Optional[Dict[str, Any]] = None
+    try:
+        prediction = await _call_openai_inference(jpeg_path)
+    except Exception as exc:
+        log.warning("infer_openai_failed", error=str(exc))
 
-    tags = [t for t in (brand, size, colour, item_type) if t]
-    response: Dict[str, Any] = {
-        "category": item_type,
-        "item_type": {"value": item_type, "confidence": iconf},
-        "brand": {"value": brand or "", "confidence": bconf},
-        "size": {"value": size or "", "confidence": sconf},
-        "colour": {"value": colour, "confidence": "Medium"},
-        "label_text": label_text,
-        "tags": tags,
-        "source": "pi-local",
-        "fast_mode": fast_mode,
-    }
-    if any((brand, item_type, size, colour)):
-        price_estimate = await pricing_service.suggest_price(
-            brand=brand,
-            category=item_type,
-            size=size,
-            colour=colour,
-            condition="Good",
-        )
-    else:
-        price_estimate = PriceEstimate()
-
-    if price_estimate.has_prices:
-        response["price"] = price_estimate.as_response()
-    if price_estimate.examples:
-        response["examples"] = price_estimate.examples
+    if not prediction:
+        prediction = await _heuristic_inference(jpeg_path, file.filename or "", fast_mode)
 
     _cleanup_temp_files(raw_path, jpeg_path)
-    return response
+    return {
+        "brand": prediction.get("brand"),
+        "size": prediction.get("size"),
+        "colour": prediction.get("colour"),
+        "category": prediction.get("category"),
+        "condition": prediction.get("condition") or "Good",
+        "price_low": prediction.get("price_low"),
+        "price_mid": prediction.get("price_mid"),
+        "price_high": prediction.get("price_high"),
+        "label_text": prediction.get("label_text"),
+        "source": prediction.get("source", "unknown"),
+    }
 
 @app.post('/api/upload')
 async def upload(request: Request,

@@ -1,4 +1,4 @@
-name: Sampler (Openverse) — Download & Report
+name: Sampler (dataset) — Download & Report
 
 on:
   workflow_dispatch: {}
@@ -16,12 +16,14 @@ jobs:
           git config user.name  "${{ secrets.GH_AGENT_NAME || 'pi-agent' }}"
           git config user.email "${{ secrets.GH_AGENT_EMAIL || 'pi@local' }}"
 
-      - name: Download images on the Pi
+      - name: Build manifest and run evals
+        env:
+          PI_INFER_URL: ${{ vars.PI_INFER_URL || 'http://127.0.0.1:8080/api/infer' }}
         run: bash scripts/sampler_run.sh
 
       - name: Commit summary only (no images)
         run: |
-          git add .agent/sampler/summary-*.json
+          git add .agent/sampler/summary-*.json data/evals || true
           if git diff --cached --quiet; then
             echo "No new summary to commit."
             exit 0

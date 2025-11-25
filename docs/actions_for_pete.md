@@ -67,7 +67,7 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [ ] M1-21 – Allow JSON-only draft creation (no photos) for testing, saving placeholder images to `static/thumbs`.
 - [ ] M1-22 – Validate metadata payloads with a Pydantic schema and surface all validation errors in `/api/drafts`.
 - [ ] M1-23 – Add `/api/drafts/{id}/history` returning status/price changes stored in a new audit table.
-- [ ] M1-24 – Provide `/api/drafts/{id}/export` returning a mobile-friendly summary for copy/paste workflows.
+- [x] M1-24 – Provide `/api/drafts/{id}/export` returning a mobile-friendly summary for copy/paste workflows.
 
 ### 2.3 Database + Pi UI alignment
 
@@ -161,7 +161,7 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - [x] Replace the raw metadata textarea with simple inputs (brand, size, condition dropdowns) that compose JSON for the backend. (2025-11-19 – Brand, size, and condition chips feed metadata automatically.)
 - [x] After upload, show a success state that deep-links to the new draft (navigate to `DraftDetailScreen`). (2025-11-18 – Upload screen takes you straight into Draft Detail when the server replies with an `item_id`.)
 - [x] Add a “Post to Vinted” helper button on `DraftDetailScreen`: copy title/description/price to the clipboard and open the Vinted app (or instructions) so Pete can publish quickly. (2025-11-18 – helper copies listing text and opens or guides you to the Vinted app.)
-- [ ] M2-31 – Add validation/error banners to the Upload screen to surface auth failures or compliance rejection reasons returned by the server.
+- [x] M2-31 – Add validation/error banners to the Upload screen to surface auth failures or compliance rejection reasons returned by the server. (2025-11-20 – Upload screen now blocks missing server URLs and shows inline error banners when `/api/drafts` rejects uploads.)
 - [ ] M2-32 – Provide an optional metadata form (brand, size, colour, condition) with dropdowns and validation before upload.
 - [ ] M2-33 – Integrate Expo Image Manipulator to downscale large photos before uploading on cellular networks.
 - [ ] M2-34 – Cache pending uploads locally (AsyncStorage) so users can resume after an app restart.
@@ -242,3 +242,11 @@ Single backlog for FlipLens. Each agent reads this file on startup, grabs the ne
 - Vinted Pro API integration (business accounts).
 - Non-clothing categories needing special handling (electronics, toys, etc.).
 - CharityLoop client app / broader marketplace integrations.
+
+---
+
+## 6. Medium-term AI pipeline (starting now)
+
+- [x] Wire `/api/infer` to prefer OpenAI vision when `OPENAI_API_KEY` is set, with a heuristic fallback and regression tests.
+- [x] Replace Openverse sampling with `data/training_items.jsonl` + `tools/build_eval_manifest.py` so evals use Pete's own photos.
+- [ ] Plug the cloud-train stub into a real fine-tune once pricing/labels are locked and a training pack is ready.

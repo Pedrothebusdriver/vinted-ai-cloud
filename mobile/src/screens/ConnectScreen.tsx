@@ -42,6 +42,11 @@ export const ConnectScreen = ({ navigation }: Props) => {
   const [refreshing, setRefreshing] = useState(false);
   const [serverVersion, setServerVersion] = useState<string | null>(null);
 
+  const resolvedBase = useMemo(
+    () => cleanUrl || baseUrl || Config.apiBase,
+    [baseUrl, cleanUrl]
+  );
+
   useEffect(() => {
     if (hydrated) {
       setUrl(baseUrl);
@@ -67,7 +72,7 @@ export const ConnectScreen = ({ navigation }: Props) => {
     setMessage(null);
     setServerVersion(null);
     try {
-      const data = await fetchHealth(cleanUrl || baseUrl, {
+      const data = await fetchHealth(resolvedBase, {
         uploadKey: cleanKey || null,
       });
       const text = data.version
@@ -76,23 +81,23 @@ export const ConnectScreen = ({ navigation }: Props) => {
       setStatus("ok");
       setMessage(text);
       setServerVersion(data.version || null);
-      setBaseUrl(cleanUrl || baseUrl);
+      setBaseUrl(resolvedBase);
       setUploadKey(cleanKey || null);
       setLastConnected(new Date().toISOString());
     } catch (err: any) {
       setStatus("error");
-      setMessage(err.message || "Unable to reach server.");
+      setMessage(formatConnectionError(err, resolvedBase));
       setServerVersion(null);
     } finally {
       setPending(false);
     }
-  }, [baseUrl, cleanKey, cleanUrl, setBaseUrl, setLastConnected, setUploadKey]);
+  }, [cleanKey, resolvedBase, setBaseUrl, setLastConnected, setUploadKey]);
 
   const proceed = useCallback(() => {
-    setBaseUrl(cleanUrl || baseUrl);
+    setBaseUrl(resolvedBase);
     setUploadKey(cleanKey || null);
     navigation.navigate("Drafts");
-  }, [baseUrl, cleanKey, cleanUrl, navigation, setBaseUrl, setUploadKey]);
+  }, [cleanKey, navigation, resolvedBase, setBaseUrl, setUploadKey]);
 
   const onRefresh = useCallback(async () => {
     if (pending) return;
@@ -105,14 +110,14 @@ export const ConnectScreen = ({ navigation }: Props) => {
   }, [pending, testConnection]);
 
   const onSaveServer = useCallback(() => {
-    const targetUrl = cleanUrl || baseUrl;
+    const targetUrl = resolvedBase;
     if (!targetUrl) return;
     addServer({
       baseUrl: targetUrl,
       uploadKey: cleanKey || uploadKey || null,
       lastConnected,
     });
-  }, [addServer, baseUrl, cleanKey, cleanUrl, lastConnected, uploadKey]);
+  }, [addServer, cleanKey, lastConnected, resolvedBase, uploadKey]);
 
   const versionMismatch =
     !!serverVersion && serverVersion !== Config.coreSchemaVersion;
@@ -248,12 +253,18 @@ export const ConnectScreen = ({ navigation }: Props) => {
           <Button
             title="Continue"
             onPress={proceed}
-            disabled={!hydrated || pending}
+            disabled={!hydrated || pending || !resolvedBase}
           />
         </View>
       </View>
     </SafeAreaView>
   );
+};
+
+const formatConnectionError = (err: any, url: string | undefined) => {
+  if (!url) return "Missing server URL. Enter the Pi address first.";
+  const baseMessage = err?.message || "Unable to reach server.";
+  return `${baseMessage} · Check Wi‑Fi and confirm ${url} is reachable on the same network.`;
 };
 
 const styles = StyleSheet.create({

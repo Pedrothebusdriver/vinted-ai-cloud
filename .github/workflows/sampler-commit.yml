@@ -1,4 +1,4 @@
-name: Sampler (Openverse) — Commit Manifest
+name: Sampler (dataset) — Commit Manifest
 on:
   workflow_dispatch: {}
   schedule:
@@ -19,63 +19,12 @@ jobs:
           git config user.name  "${{ secrets.GH_AGENT_NAME || 'pi-agent' }}"
           git config user.email "${{ secrets.GH_AGENT_EMAIL || 'pi@local' }}"
 
-      - name: Build Openverse manifest
+      - name: Build dataset manifest
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .agent/sampler
-          python3 - <<'PY'
-          import json, urllib.request as u, urllib.parse as up, time
-
-          BUCKETS = {
-              "electronics/phones": "smartphone phone",
-              "electronics/laptops": "laptop",
-              "shoes": "shoes",
-              "jackets": "jacket",
-              "dresses": "dress",
-              "bags": "handbag",
-              "toys": "toy",
-              "video-games": "video game",
-              "homeware": "homeware",
-          }
-
-          def search(q, n=12):
-              url = "https://api.openverse.engineering/v1/images/?" + up.urlencode({
-                  "q": q, "license": "cc0", "page_size": n, "format": "json"
-              })
-              with u.urlopen(url, timeout=20) as r:
-                  data = json.load(r)
-              items = []
-              for i in data.get("results", []):
-                  url = i.get("url") or i.get("thumbnail") or i.get("foreign_landing_url")
-                  if not url:
-                      continue
-                  items.append({
-                      "id": i.get("identifier"),
-                      "title": i.get("title"),
-                      "url": url,
-                      "provider": i.get("provider"),
-                      "landing": i.get("foreign_landing_url"),
-                  })
-              return items
-
-          ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-          manifest = {"ts": ts, "source": "openverse", "buckets": []}
-
-          for bucket, query in BUCKETS.items():
-              try:
-                  items = search(query, 12)
-              except Exception:
-                  items = []
-              manifest["buckets"].append({
-                  "bucket": bucket, "query": query, "items": items
-              })
-
-          out = f".agent/sampler/manifest-{ts}.json"
-          with open(out, "w", encoding="utf-8") as f:
-              json.dump(manifest, f, ensure_ascii=False, indent=2)
-          print("WROTE", out)
-          PY
+          python3 tools/build_eval_manifest.py
 
       - name: Show manifest summary
         shell: bash

@@ -11,4 +11,5 @@ python-dotenv==1.0.1
 rapidfuzz==3.9.6
 structlog==24.4.0
 cloudscraper==1.2.71
+openai==1.51.2
 prometheus-fastapi-instrumentator==6.1.0

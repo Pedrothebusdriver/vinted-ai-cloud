@@ -1,9 +1,26 @@
 import { Config } from "./config";
 
-function ensureOk(res: Response) {
-  if (!res.ok) {
-    throw new Error(`Request failed: ${res.status}`);
+async function ensureOk(res: Response) {
+  if (res.ok) return;
+  let detail = `Request failed: ${res.status}`;
+  try {
+    const data = await res.json();
+    if (data?.detail) {
+      detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+    } else if (data?.error) {
+      detail = typeof data.error === "string" ? data.error : JSON.stringify(data.error);
+    }
+  } catch {
+    try {
+      const text = await res.text();
+      if (text) {
+        detail = `${detail} - ${text}`;
+      }
+    } catch {
+      // ignore secondary parsing errors
+    }
   }
+  throw new Error(detail);
 }
 
 const normalizeBase = (url?: string) => {
@@ -69,7 +86,7 @@ export async function uploadImages(
     body: formData,
     headers: buildHeaders(options?.uploadKey),
   });
-  ensureOk(res);
+  await ensureOk(res);
   return res.json();
 }
 
@@ -86,7 +103,7 @@ export async function createDraftFromUpload(
     body: formData,
     headers: buildHeaders(options?.uploadKey),
   });
-  ensureOk(res);
+  await ensureOk(res);
   return res.json();
 }
 
@@ -133,7 +150,7 @@ export async function fetchHealth(
   const res = await fetch(`${base}/health`, {
     headers: buildHeaders(options?.uploadKey),
   });
-  ensureOk(res);
+  await ensureOk(res);
   return res.json();
 }
 
@@ -237,7 +254,7 @@ export async function fetchDrafts(
   const res = await fetch(`${base}/api/drafts${query}`, {
     headers: buildHeaders(options?.uploadKey),
   });
-  ensureOk(res);
+  await ensureOk(res);
   const data = await res.json();
   if (!Array.isArray(data)) {
     return [];
@@ -254,7 +271,7 @@ export async function fetchDraftDetail(
   const res = await fetch(`${base}/api/drafts/${draftId}`, {
     headers: buildHeaders(options?.uploadKey),
   });
-  ensureOk(res);
+  await ensureOk(res);
   const data = await res.json();
   const summary = normalizeDraftSummary(data, base);
   const photos: DraftPhoto[] = Array.isArray(data.photos)
@@ -299,5 +316,5 @@ export async function updateDraft(
     }),
     body: JSON.stringify(payload),
   });
-  ensureOk(res);
+  await ensureOk(res);
 }

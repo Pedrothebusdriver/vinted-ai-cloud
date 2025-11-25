@@ -41,10 +41,17 @@ Its purpose is to give Pete a quick, human-readable view of:
 
 ## In progress (by agents)
 
-_A short list of major areas agents are actively working on (e.g. core ingest, /api/drafts endpoint, mobile Drafts screen)._
+_A short list of major areas agents are actively working on (e.g. core ingest, /api/drafts endpoint, mobile Drafts screen)._ 
 
 ---
 
 ## Decisions / questions for Pete
 
 _The Status agent should put any open decisions or questions here for Pete to review in the chat (e.g. “Choose between A/B for category UI”, “Approve moving core to mini PC”)._
+
+---
+
+## Recent updates
+
+- 2025-11-25 15:29 UTC – MOBILE: completed M2-31 (Upload error banners and missing server guard); improved Connect and Draft Detail resilience. Push attempt to origin/main failed (local refspec/auth not available in this environment).
+- 2025-11-25 17:12 UTC – CORE/OPS/QA: added OpenAI-powered `/api/infer` with heuristic fallback + regression tests; replaced Openverse sampler with local training manifest + eval loop and documented the dataset pipeline. Push may still be blocked in this environment (origin auth).

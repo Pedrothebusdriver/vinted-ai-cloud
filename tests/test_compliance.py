@@ -41,3 +41,37 @@ def test_check_image_accepts_valid_gradient(tmp_path):
     path = _write_image(tmp_path, "ok.jpg", img)
     allowed, reason = compliance.check_image(path)
     assert allowed, reason
+
+
+def test_check_image_handles_grayscale(tmp_path):
+    gradient = np.tile(np.linspace(0, 255, 512, dtype=np.uint8), (512, 1))
+    path = _write_image(tmp_path, "gray.jpg", gradient)
+    allowed, reason = compliance.check_image(path)
+    assert allowed, reason
+
+
+def test_detect_body_ratio_handles_scalar_weights(monkeypatch, tmp_path):
+    class StubHog:
+        def detectMultiScale(self, image, **kwargs):
+            # Returns a single rect with scalar weight to mimic OpenCV variations.
+            return [(0, 0, 50, 100)], np.array(0.5)
+
+    monkeypatch.setattr(compliance, "_HOG", StubHog())
+    gradient = np.linspace(0, 255, 512, dtype=np.uint8)
+    img = np.stack([np.tile(gradient, (512, 1))] * 3, axis=-1)
+    path = _write_image(tmp_path, "stub.jpg", img)
+    allowed, reason = compliance.check_image(path)
+    assert allowed, reason
+
+
+def test_detect_body_ratio_handles_detector_errors(monkeypatch, tmp_path):
+    class StubHog:
+        def detectMultiScale(self, image, **kwargs):
+            raise ValueError("oops")
+
+    monkeypatch.setattr(compliance, "_HOG", StubHog())
+    gradient = np.linspace(0, 255, 512, dtype=np.uint8)
+    img = np.stack([np.tile(gradient, (512, 1))] * 3, axis=-1)
+    path = _write_image(tmp_path, "error.jpg", img)
+    allowed, reason = compliance.check_image(path)
+    assert allowed, reason

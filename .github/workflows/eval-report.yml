@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, os, time, urllib.request as u
+          import json, os, urllib.request as u
           wh = os.environ.get("WEBHOOK")
           mf = os.environ.get("MANIFEST") or ""
           if not wh:
@@ -50,30 +50,17 @@ jobs:
               raise SystemExit(f"Manifest not found: {mf}")
 
           data = json.load(open(mf, "r", encoding="utf-8"))
-          picks = []
-          for b in data.get("buckets", []):
-              bucket = b.get("bucket","unknown")
-              for it in b.get("items", []):
-                  url = (it.get("thumbnail") or it.get("url") or it.get("landing") or "").strip()
-                  if url.startswith("https://"):
-                      title = (it.get("title") or bucket).strip()
-                      picks.append((bucket, title, url))
-          if not picks:
-              raise SystemExit("No HTTPS image links found in manifest")
+          count = len(data.get("items", []))
+          dataset = data.get("dataset", "(unknown)")
 
-          picks = picks[:5]
-
-          def post(text):
-              body = {"content": text}
-              req = u.Request(wh, data=json.dumps(body).encode("utf-8"),
-                              headers={"Content-Type":"application/json"})
-              with u.urlopen(req, timeout=20) as r:
-                  print("Discord:", r.status)
-
-          from os.path import basename
-          post(f"**Eval preview:** `{basename(mf)}` ({len(picks)} imgs)")
-          time.sleep(0.5)
-          for bucket, title, url in picks:
-              post(f"bucket:`{bucket}` — {title}\n{url}")
-              time.sleep(0.8)
+          body = {
+              "content": f"**Eval preview:** `{os.path.basename(mf)}` with {count} items\nDataset: `{dataset}`"
+          }
+          req = u.Request(
+              wh,
+              data=json.dumps(body).encode("utf-8"),
+              headers={"Content-Type": "application/json"},
+          )
+          with u.urlopen(req, timeout=20) as r:
+              print("Discord:", r.status)
           PY
