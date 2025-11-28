@@ -1,3 +1,4 @@
+import json
 import math
 import os
 import random
@@ -52,6 +53,12 @@ UA_LIST = [
 
 # tiny in-memory cache with TTL (kept simple on purpose)
 _cache: Dict[str, Any] = {}  # key -> {"t": timestamp, "data": dict}
+
+# =========================
+# Drafts (temporary store)
+# =========================
+drafts: Dict[int, Dict[str, Any]] = {}
+next_draft_id = 1
 
 app = Flask(__name__)
 
@@ -397,6 +404,42 @@ def get_comps(brand: str, item_type: str, size: str, colour: str) -> Dict[str, A
 # =========================
 # Routes
 # =========================
+def _now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _draft_summary(draft: Dict[str, Any]) -> Dict[str, Any]:
+    photos = draft.get("photos") or []
+    return {
+        "id": draft["id"],
+        "title": draft.get("title") or f"Draft #{draft['id']}",
+        "status": draft.get("status") or "draft",
+        "brand": draft.get("brand"),
+        "size": draft.get("size"),
+        "colour": draft.get("colour"),
+        "updated_at": draft.get("updated_at"),
+        "price_mid": draft.get("price_mid"),
+        "thumbnail_url": draft.get("thumbnail_url"),
+        "photo_count": len(photos) if isinstance(photos, list) else None,
+    }
+
+
+def _draft_detail(draft: Dict[str, Any]) -> Dict[str, Any]:
+    data = _draft_summary(draft)
+    data.update(
+        {
+            "description": draft.get("description"),
+            "condition": draft.get("condition"),
+            "price_low": draft.get("price_low"),
+            "price_high": draft.get("price_high"),
+            "selected_price": draft.get("selected_price"),
+            "photos": draft.get("photos") or [],
+            "raw": draft.get("raw"),
+        }
+    )
+    return data
+
+
 @app.get("/health")
 def health():
     return jsonify({"ok": True, "vinted_base": VINTED_BASE})
@@ -418,6 +461,141 @@ def api_price():
 @app.get("/price")  # simple fallback/alias
 def price():
     return api_price()
+
+
+@app.get("/api/drafts")
+def list_drafts():
+    status_filter = (request.args.get("status") or "").strip().lower()
+    brand_filter = (request.args.get("brand") or "").strip().lower()
+    size_filter = (request.args.get("size") or "").strip().lower()
+
+    try:
+        limit = int(request.args.get("limit", "20"))
+    except Exception:
+        limit = 20
+    try:
+        offset = int(request.args.get("offset", "0"))
+    except Exception:
+        offset = 0
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+
+    items = list(drafts.values())
+    if status_filter:
+        items = [d for d in items if str(d.get("status") or "").lower() == status_filter]
+    if brand_filter:
+        items = [
+            d for d in items if brand_filter in str(d.get("brand") or "").lower()
+        ]
+    if size_filter:
+        items = [d for d in items if size_filter in str(d.get("size") or "").lower()]
+
+    items = sorted(items, key=lambda d: d.get("updated_at") or "", reverse=True)
+    sliced = items[offset : offset + limit]
+    return jsonify([_draft_summary(d) for d in sliced])
+
+
+@app.get("/api/drafts/<int:draft_id>")
+def get_draft(draft_id: int):
+    draft = drafts.get(draft_id)
+    if not draft:
+        return jsonify({"detail": "Not found"}), 404
+    return jsonify(_draft_detail(draft))
+
+
+@app.post("/api/drafts")
+def create_draft():
+    global next_draft_id
+
+    payload: Dict[str, Any] = {}
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+
+    metadata_raw = request.form.get("metadata")
+    if metadata_raw:
+        try:
+            metadata_payload = json.loads(metadata_raw)
+            if isinstance(metadata_payload, dict):
+                payload.update(metadata_payload)
+        except Exception:
+            pass
+
+    title = payload.get("title") or f"Draft #{next_draft_id}"
+    status = payload.get("status") or "draft"
+    brand = payload.get("brand")
+    size = payload.get("size")
+    colour = payload.get("colour")
+    condition = payload.get("condition")
+    description = payload.get("description")
+    price_mid = payload.get("price_mid")
+    price_low = payload.get("price_low")
+    price_high = payload.get("price_high")
+    selected_price = payload.get("price") or payload.get("selected_price")
+
+    files = request.files.getlist("files")
+    photos: List[Dict[str, Any]] = []
+    for idx, file in enumerate(files):
+        photos.append(
+            {
+                "id": idx + 1,
+                "url": f"https://placehold.co/600x800?text=Draft+{next_draft_id}+Photo+{idx + 1}",
+                "original_filename": file.filename,
+            }
+        )
+
+    draft = {
+        "id": next_draft_id,
+        "title": title,
+        "status": status,
+        "brand": brand,
+        "size": size,
+        "colour": colour,
+        "condition": condition,
+        "description": description,
+        "price_mid": price_mid,
+        "price_low": price_low,
+        "price_high": price_high,
+        "selected_price": selected_price,
+        "photos": photos,
+        "thumbnail_url": photos[0]["url"] if photos else None,
+        "updated_at": _now_iso(),
+    }
+    drafts[next_draft_id] = draft
+    next_draft_id += 1
+
+    return jsonify(_draft_detail(draft)), 201
+
+
+@app.put("/api/drafts/<int:draft_id>")
+def update_draft(draft_id: int):
+    draft = drafts.get(draft_id)
+    if not draft:
+        return jsonify({"detail": "Not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    if "title" in data:
+        draft["title"] = data.get("title") or draft.get("title")
+    if "description" in data:
+        draft["description"] = data.get("description")
+    if "status" in data:
+        draft["status"] = data.get("status") or draft.get("status") or "draft"
+    if "price" in data:
+        try:
+            price_val = float(data.get("price"))
+            draft["selected_price"] = price_val
+            if not draft.get("price_mid"):
+                draft["price_mid"] = price_val
+        except Exception:
+            pass
+
+    draft["updated_at"] = _now_iso()
+    return jsonify(_draft_detail(draft))
+
+
+@app.errorhandler(404)
+def handle_404(_err):
+    return jsonify({"detail": "Not found"}), 404
+
 
 if __name__ == "__main__":
     # Local debug: Render runs via gunicorn, so this is ignored there
