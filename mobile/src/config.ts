@@ -5,7 +5,7 @@ const envBase =
     : undefined;
 
 export const Config = {
-  apiBase: envBase || "http://192.168.0.10:8000",
+  apiBase: envBase || "http://192.168.0.21:10000",
   coreSchemaVersion:
     (typeof globalThis !== "undefined"
       ? (globalThis as any)?.process?.env?.EXPO_PUBLIC_CORE_VERSION

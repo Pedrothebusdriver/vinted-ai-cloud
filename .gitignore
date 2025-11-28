@@ -19,6 +19,7 @@ pi-app/static/thumbs/
 pi-app/data/
 data/
 pi-app/var/
+mobile/ip_fix_backup_*/
 
 # OS junk
 .DS_Store

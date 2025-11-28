@@ -68,7 +68,7 @@ export const ServerSettingsModal = ({ visible, onClose }: Props) => {
               value={url}
               onChangeText={setUrl}
               autoCapitalize="none"
-              placeholder="http://192.168.0.10:8080"
+              placeholder="http://192.168.0.21:10000"
             />
           </View>
           <View style={styles.field}>

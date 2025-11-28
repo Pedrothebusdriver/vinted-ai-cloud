@@ -13,12 +13,20 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { fetchHealth } from "../api";
 import { Config } from "../config";
 import { useServer } from "../state/ServerContext";
 import { RootStackParamList } from "../navigation/types";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Connect">;
+
+export const normalizeBaseUrl = (raw: string): string => {
+  const trimmed = (raw || "").trim();
+  if (!trimmed) {
+    throw new Error("Missing server URL");
+  }
+  const withProto = trimmed.startsWith("http") ? trimmed : `http://${trimmed}`;
+  return withProto.replace(/\/$/, "");
+};
 
 export const ConnectScreen = ({ navigation }: Props) => {
   const {
@@ -42,6 +50,8 @@ export const ConnectScreen = ({ navigation }: Props) => {
   const [refreshing, setRefreshing] = useState(false);
   const [serverVersion, setServerVersion] = useState<string | null>(null);
 
+  const cleanUrl = useMemo(() => (url || "").trim(), [url]);
+  const cleanKey = useMemo(() => key.trim(), [key]);
   const resolvedBase = useMemo(
     () => cleanUrl || baseUrl || Config.apiBase,
     [baseUrl, cleanUrl]
@@ -53,9 +63,6 @@ export const ConnectScreen = ({ navigation }: Props) => {
       setKey(uploadKey || "");
     }
   }, [baseUrl, hydrated, uploadKey]);
-
-  const cleanUrl = useMemo(() => url.trim(), [url]);
-  const cleanKey = useMemo(() => key.trim(), [key]);
 
   const lastConnectedLabel = useMemo(() => {
     if (!lastConnected) return null;
@@ -71,33 +78,88 @@ export const ConnectScreen = ({ navigation }: Props) => {
     setStatus("idle");
     setMessage(null);
     setServerVersion(null);
+
+    const candidate = cleanUrl || baseUrl || Config.apiBase;
+
+    let normalized: string;
     try {
-      const data = await fetchHealth(resolvedBase, {
-        uploadKey: cleanKey || null,
-      });
+      normalized = normalizeBaseUrl(candidate);
+    } catch (err: any) {
+      setPending(false);
+      setStatus("error");
+      setMessage(err?.message || "Missing or invalid server URL");
+      return;
+    }
+
+    const testedUrl = `${normalized}/health`;
+    console.log("[FlipLens] TestConnection: testing", testedUrl);
+
+    try {
+      const res = await fetch(testedUrl);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const data = await res.json().catch(() => ({} as any));
       const text = data.version
         ? `Server ready (version ${data.version})`
         : "Server responded.";
+
+      const timestamp = new Date().toISOString();
+
       setStatus("ok");
-      setMessage(text);
-      setServerVersion(data.version || null);
-      setBaseUrl(resolvedBase);
+      setMessage(`${text} · ${testedUrl}`);
+      setServerVersion(data?.version || null);
+
+      setBaseUrl(normalized);
       setUploadKey(cleanKey || null);
-      setLastConnected(new Date().toISOString());
+      setLastConnected(timestamp);
+      addServer({
+        baseUrl: normalized,
+        uploadKey: cleanKey || null,
+        lastConnected: timestamp,
+      });
     } catch (err: any) {
+      console.log("[FlipLens] TestConnection error for", testedUrl, err);
       setStatus("error");
-      setMessage(formatConnectionError(err, resolvedBase));
+      setMessage(
+        `Network request timed out or failed.\nTested: ${testedUrl}\nError: ${
+          err?.message || String(err)
+        }`
+      );
       setServerVersion(null);
     } finally {
       setPending(false);
     }
-  }, [cleanKey, resolvedBase, setBaseUrl, setLastConnected, setUploadKey]);
+  }, [
+    addServer,
+    baseUrl,
+    cleanKey,
+    setBaseUrl,
+    setLastConnected,
+    setUploadKey,
+    cleanUrl,
+  ]);
 
   const proceed = useCallback(() => {
-    setBaseUrl(resolvedBase);
-    setUploadKey(cleanKey || null);
-    navigation.navigate("Drafts");
-  }, [cleanKey, navigation, resolvedBase, setBaseUrl, setUploadKey]);
+    try {
+      const normalized = normalizeBaseUrl(cleanUrl || baseUrl || Config.apiBase);
+      setBaseUrl(normalized);
+      setUploadKey(cleanKey || null);
+      navigation.navigate("Drafts");
+    } catch (err) {
+      setStatus("error");
+      setMessage(
+        (err as Error)?.message || "Missing or invalid server URL to continue"
+      );
+    }
+  }, [
+    baseUrl,
+    cleanKey,
+    cleanUrl,
+    navigation,
+    setBaseUrl,
+    setUploadKey,
+  ]);
 
   const onRefresh = useCallback(async () => {
     if (pending) return;
@@ -149,7 +211,7 @@ export const ConnectScreen = ({ navigation }: Props) => {
             onChangeText={setUrl}
             autoCapitalize="none"
             autoCorrect={false}
-            placeholder="http://192.168.0.10:8080"
+            placeholder="http://192.168.0.21:10000"
           />
           <Button
             title={pending ? "Checking..." : "Test Connection"}
@@ -227,7 +289,11 @@ export const ConnectScreen = ({ navigation }: Props) => {
                       styles.savedCard,
                       isActive && styles.savedCardActive,
                     ]}
-                    onPress={() => selectServer(server.id)}
+                    onPress={() => {
+                      setUrl(server.baseUrl);
+                      setKey(server.uploadKey || "");
+                      selectServer(server.id);
+                    }}
                   >
                     <Text style={styles.savedLabel}>{label}</Text>
                     <Text style={styles.savedUrl}>{server.baseUrl}</Text>
@@ -259,12 +325,6 @@ export const ConnectScreen = ({ navigation }: Props) => {
       </View>
     </SafeAreaView>
   );
-};
-
-const formatConnectionError = (err: any, url: string | undefined) => {
-  if (!url) return "Missing server URL. Enter the Pi address first.";
-  const baseMessage = err?.message || "Unable to reach server.";
-  return `${baseMessage} · Check Wi‑Fi and confirm ${url} is reachable on the same network.`;
 };
 
 const styles = StyleSheet.create({
