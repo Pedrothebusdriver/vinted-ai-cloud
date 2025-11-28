@@ -1,0 +1,25 @@
+# Git notes - 2025-11-28
+
+- Branch: main
+- Remote: origin https://github.com/Pedrothebusdriver/vinted-ai-cloud
+- Files committed today:
+  - chore: lock in local mobile connection to Flask backend
+    - .gitignore
+    - mobile/package.json, mobile/package-lock.json
+    - mobile/src/config.ts
+    - mobile/src/screens/ConnectScreen.tsx
+    - mobile/src/components/ServerSettingsModal.tsx
+    - mobile/babel.config.js, mobile/jest.config.js, mobile/jest.setup.ts
+    - mobile/src/screens/__tests__/ConnectScreen.test.tsx
+    - mobile/src/screens/__tests__/normalizeBaseUrl.test.ts
+  - chore: document and stabilise Flask backend for FlipLens
+    - app.py
+    - docs/BACKEND_DRAFTS_NOTES.md
+    - docs/BACKEND_NOTES_LOCAL.md
+  - docs: update marketplace eval + notes (pending in this push)
+    - docs/CONNECTION_NOTES_LOCAL.md
+    - docs/MARKETPLACE_EVAL.md
+    - tools/marketplace_eval/ (harness code, example data, reports)
+    - docs/GIT_NOTES.md
+- Local-only notes:
+  - mobile/ip_fix_backup_20251128_103547 kept locally (backup of prior connection settings) and ignored from commits for now.
