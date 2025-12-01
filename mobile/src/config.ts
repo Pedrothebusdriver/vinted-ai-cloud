@@ -11,3 +11,10 @@ export const Config = {
       ? (globalThis as any)?.process?.env?.EXPO_PUBLIC_CORE_VERSION
       : undefined) || "0.1.0",
 };
+
+export const BulkUploadConfig = {
+  BULK_TIME_GAP_SECONDS: 90,
+  MAX_PHOTOS_PER_DRAFT: 8,
+  MAX_BULK_PHOTOS: 80,
+  INTER_REQUEST_DELAY_MS: 250,
+};

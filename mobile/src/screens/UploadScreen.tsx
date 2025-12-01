@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  Switch,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -15,30 +16,98 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import * as ImagePicker from "expo-image-picker";
 import {
-  createDraftFromUpload,
+  processImageToDraft,
   UploadFileInput,
   DraftDetail,
 } from "../api";
+import { BulkUploadConfig } from "../config";
 import { useServer } from "../state/ServerContext";
 import { RootStackParamList } from "../navigation/types";
+import { groupAssetsIntoItems } from "../utils/bulkGrouping";
 
-type Props = NativeStackScreenProps<RootStackParamList, "Upload">;
+type Props = NativeStackScreenProps<RootStackParamList, "Upload"> & {
+  initialAssets?: LocalAsset[];
+};
 
 type LocalAsset = {
   uri: string;
   name?: string;
   type?: string;
+  creationTime?: number | null;
 };
 
-export const UploadScreen = ({ navigation }: Props) => {
+type SingleUploadDeps = {
+  baseUrl?: string | null;
+  files: UploadFileInput[];
+  metadataPayload?: string;
+  uploadKey?: string | null;
+  navigation: Props["navigation"];
+  clearForm: () => void;
+  setStatus: (value: string | null) => void;
+  setError: (value: string | null) => void;
+  setPending: (value: boolean) => void;
+};
+
+export async function runSingleUpload({
+  baseUrl,
+  files,
+  metadataPayload,
+  uploadKey,
+  navigation,
+  clearForm,
+  setStatus,
+  setError,
+  setPending,
+}: SingleUploadDeps) {
+  setPending(true);
+  setStatus(null);
+  setError(null);
+  try {
+    const response = await processImageToDraft(
+      baseUrl || undefined,
+      files,
+      metadataPayload,
+      { uploadKey }
+    );
+    const newId =
+      response?.id ??
+      response?.draft_id ??
+      response?.item_id ??
+      response?.draft?.id;
+    setStatus("Draft created. Opening editor...");
+    if (newId) {
+      navigation.navigate("DraftDetail", { id: newId });
+      clearForm();
+    } else {
+      Alert.alert(
+        "Uploaded",
+        "Draft created. Refresh the Drafts list to see it."
+      );
+    }
+  } catch (err: any) {
+    const message = err?.message || "Unable to upload photos.";
+    setError(message);
+    Alert.alert("Upload failed", message);
+  } finally {
+    setPending(false);
+  }
+}
+
+export const UploadScreen = ({ navigation, initialAssets }: Props) => {
   const { baseUrl, uploadKey } = useServer();
-  const [assets, setAssets] = useState<LocalAsset[]>([]);
+  const [assets, setAssets] = useState<LocalAsset[]>(initialAssets || []);
   const [brand, setBrand] = useState("");
   const [size, setSize] = useState("");
   const [condition, setCondition] = useState("good");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
+  const [bulkSummary, setBulkSummary] = useState<string | null>(null);
 
   const files = useMemo<UploadFileInput[]>(
     () =>
@@ -47,6 +116,21 @@ export const UploadScreen = ({ navigation }: Props) => {
         name: asset.name || `photo-${idx + 1}.jpg`,
         type: asset.type || "image/jpeg",
       })),
+    [assets]
+  );
+
+  const groupedDrafts = useMemo(
+    () =>
+      groupAssetsIntoItems(
+        assets.map((asset, idx) => ({
+          uri: asset.uri,
+          name: asset.name || `photo-${idx + 1}.jpg`,
+          type: asset.type || "image/jpeg",
+          creationTime: asset.creationTime ?? null,
+        })),
+        BulkUploadConfig.BULK_TIME_GAP_SECONDS,
+        BulkUploadConfig.MAX_PHOTOS_PER_DRAFT
+      ),
     [assets]
   );
 
@@ -68,16 +152,25 @@ export const UploadScreen = ({ navigation }: Props) => {
       quality: 0.8,
     });
     if (!result.canceled) {
-      setAssets((prev) => [
-        ...prev,
-        ...result.assets.map((asset) => ({
-          uri: asset.uri,
-          name: asset.fileName || asset.assetId || asset.uri.split("/").pop(),
-          type: asset.mimeType || "image/jpeg",
-        })),
-      ]);
+      const picked = result.assets.map((asset) => ({
+        uri: asset.uri,
+        name: asset.fileName || asset.assetId || asset.uri.split("/").pop(),
+        type: asset.mimeType || "image/jpeg",
+        creationTime: asset.creationTime ?? null,
+      }));
+      setAssets((prev) => {
+        const merged = [...prev, ...picked];
+        if (bulkMode && merged.length > BulkUploadConfig.MAX_BULK_PHOTOS) {
+          Alert.alert(
+            "Too many photos",
+            `Bulk upload is limited to ${BulkUploadConfig.MAX_BULK_PHOTOS} photos. We kept the first ${BulkUploadConfig.MAX_BULK_PHOTOS}.`
+          );
+          return merged.slice(0, BulkUploadConfig.MAX_BULK_PHOTOS);
+        }
+        return merged;
+      });
     }
-  }, [requestMediaPermission]);
+  }, [bulkMode, requestMediaPermission]);
 
   const takePhoto = useCallback(async () => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
@@ -91,16 +184,25 @@ export const UploadScreen = ({ navigation }: Props) => {
     });
     if (!result.canceled && result.assets.length > 0) {
       const asset = result.assets[0];
-      setAssets((prev) => [
-        ...prev,
-        {
-          uri: asset.uri,
-          name: asset.fileName || asset.assetId || asset.uri.split("/").pop(),
-          type: asset.mimeType || "image/jpeg",
-        },
-      ]);
+      const picked = {
+        uri: asset.uri,
+        name: asset.fileName || asset.assetId || asset.uri.split("/").pop(),
+        type: asset.mimeType || "image/jpeg",
+        creationTime: asset.creationTime ?? null,
+      };
+      setAssets((prev) => {
+        const merged = [...prev, picked];
+        if (bulkMode && merged.length > BulkUploadConfig.MAX_BULK_PHOTOS) {
+          Alert.alert(
+            "Too many photos",
+            `Bulk upload is limited to ${BulkUploadConfig.MAX_BULK_PHOTOS} photos. We kept the first ${BulkUploadConfig.MAX_BULK_PHOTOS}.`
+          );
+          return merged.slice(0, BulkUploadConfig.MAX_BULK_PHOTOS);
+        }
+        return merged;
+      });
     }
-  }, []);
+  }, [bulkMode]);
 
   const clearForm = useCallback(() => {
     setAssets([]);
@@ -109,6 +211,8 @@ export const UploadScreen = ({ navigation }: Props) => {
     setCondition("good");
     setStatus(null);
     setError(null);
+    setBulkProgress(null);
+    setBulkSummary(null);
   }, []);
 
   const metadataPayload = useMemo(() => {
@@ -138,38 +242,78 @@ export const UploadScreen = ({ navigation }: Props) => {
       Alert.alert("Connect to server", "Add the server URL on the Connect tab first.");
       return;
     }
-    setPending(true);
-    setStatus(null);
-    setError(null);
-    try {
-      const response = await createDraftFromUpload(
-        baseUrl,
-        files,
-        metadataPayload,
-        { uploadKey }
-      );
-      const newId = extractDraftId(response);
-      setStatus("Draft created. Opening editor...");
-      if (newId) {
-        navigation.navigate("DraftDetail", { id: newId });
-        clearForm();
-      } else {
-        Alert.alert(
-          "Uploaded",
-          "Draft created. Refresh the Drafts list to see it."
-        );
+    if (bulkMode) {
+      setBulkSummary(null);
+      setError(null);
+      setStatus(null);
+      setPending(true);
+      const groups = groupedDrafts;
+      if (!groups.length) {
+        Alert.alert("No groups", "Could not group these photos. Try again.");
+        setPending(false);
+        return;
       }
-    } catch (err: any) {
-      const message = err?.message || "Unable to upload photos.";
-      setError(message);
-      Alert.alert("Upload failed", message);
-    } finally {
-      setPending(false);
+      let success = 0;
+      let failures = 0;
+      try {
+        for (let i = 0; i < groups.length; i += 1) {
+          setBulkProgress({ current: i + 1, total: groups.length });
+          const group = groups[i];
+          const payload: UploadFileInput[] = group.map((asset, idx) => ({
+            uri: asset.uri,
+            name: asset.name || `photo-${idx + 1}.jpg`,
+            type: asset.type || "image/jpeg",
+          }));
+          try {
+            await processImageToDraft(baseUrl, payload, metadataPayload, {
+              uploadKey,
+            });
+            success += 1;
+          } catch (err) {
+            console.error("bulk_upload_failed", err);
+            failures += 1;
+          }
+          if (i < groups.length - 1 && BulkUploadConfig.INTER_REQUEST_DELAY_MS > 0) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, BulkUploadConfig.INTER_REQUEST_DELAY_MS)
+            );
+          }
+        }
+        const summary = failures
+          ? `Created ${success} drafts, ${failures} failed.`
+          : `Created ${success} drafts.`;
+        setBulkSummary(summary);
+        if (success > 0) {
+          navigation.navigate("Drafts");
+          clearForm();
+        }
+        if (failures) {
+          Alert.alert("Bulk upload partial", summary);
+        }
+      } finally {
+        setPending(false);
+        setBulkProgress(null);
+      }
+      return;
     }
+
+    await runSingleUpload({
+      baseUrl,
+      files,
+      metadataPayload,
+      uploadKey,
+      navigation,
+      clearForm,
+      setStatus,
+      setError,
+      setPending,
+    });
   }, [
     baseUrl,
+    bulkMode,
     clearForm,
     files,
+    groupedDrafts,
     metadataPayload,
     navigation,
     uploadKey,
@@ -181,9 +325,17 @@ export const UploadScreen = ({ navigation }: Props) => {
         <Text style={styles.heading}>Upload photos</Text>
         <Text style={styles.description}>
           Select photos and send them to{" "}
-          <Text style={styles.code}>POST /api/drafts</Text>. We&apos;ll send the
-          stored upload key automatically.
+          <Text style={styles.code}>POST /process_image</Text>. We&apos;ll send
+          the stored upload key automatically.
         </Text>
+        <View style={styles.bulkToggleRow}>
+          <Text style={styles.label}>Bulk upload multiple items</Text>
+          <Switch
+            value={bulkMode}
+            onValueChange={setBulkMode}
+            disabled={pending}
+          />
+        </View>
         <View style={styles.buttonRow}>
           <Button title="Pick from library" onPress={pickImages} />
           <Button title="Take photo" onPress={takePhoto} />
@@ -202,6 +354,17 @@ export const UploadScreen = ({ navigation }: Props) => {
           <View style={styles.placeholder}>
             <Text style={styles.placeholderText}>
               No photos selected yet. Add a few shots to create a draft.
+            </Text>
+          </View>
+        )}
+        {bulkMode && assets.length > 0 && (
+          <View style={styles.helperCard}>
+            <Text style={styles.helper}>
+              Selected {assets.length} photo{assets.length === 1 ? "" : "s"}.
+            </Text>
+            <Text style={styles.helper}>
+              Estimated drafts: {groupedDrafts.length} (gap {BulkUploadConfig.BULK_TIME_GAP_SECONDS}s, up to{" "}
+              {BulkUploadConfig.MAX_PHOTOS_PER_DRAFT} photos per draft).
             </Text>
           </View>
         )}
@@ -253,6 +416,12 @@ export const UploadScreen = ({ navigation }: Props) => {
         {pending && <ActivityIndicator style={{ marginBottom: 12 }} />}
         {error && <Text style={styles.error}>{error}</Text>}
         {status && <Text style={styles.status}>{status}</Text>}
+        {bulkProgress && (
+          <Text style={styles.status}>
+            Creating drafts {bulkProgress.current} / {bulkProgress.total}...
+          </Text>
+        )}
+        {bulkSummary && <Text style={styles.status}>{bulkSummary}</Text>}
         <View style={styles.buttonRow}>
           <Button
             title={pending ? "Uploading..." : "Upload"}
@@ -371,5 +540,16 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: "#fff",
+  },
+  bulkToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 4,
+  },
+  helperCard: {
+    backgroundColor: "#f3f4f6",
+    borderRadius: 8,
+    padding: 12,
   },
 });

@@ -1,14 +1,19 @@
+import copy
+import json
 import json
 import math
 import os
 import random
 import re
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
 from bs4 import BeautifulSoup
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
+from werkzeug.utils import secure_filename
 
 try:
     import cloudscraper
@@ -54,13 +59,242 @@ UA_LIST = [
 # tiny in-memory cache with TTL (kept simple on purpose)
 _cache: Dict[str, Any] = {}  # key -> {"t": timestamp, "data": dict}
 
-# =========================
-# Drafts (temporary store)
-# =========================
-drafts: Dict[int, Dict[str, Any]] = {}
-next_draft_id = 1
-
 app = Flask(__name__)
+
+# =========================
+# Draft store (in-memory)
+# =========================
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "data/uploads"))
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+drafts: Dict[int, Dict[str, Any]] = {}
+_next_draft_id = 1
+
+SAMPLE_BRANDS = ["Nike", "Adidas", "Zara", "H&M", "Uniqlo", "Levi's"]
+SAMPLE_COLOURS = ["Black", "Blue", "Charcoal", "Green", "Grey", "Red", "White"]
+SAMPLE_ITEMS = ["Hoodie", "Jacket", "Jeans", "T-Shirt", "Dress", "Sweater"]
+
+LEARNING_DATA_DIR = Path("tools/marketplace_eval/data")
+LEARNING_DATA_DIR.mkdir(parents=True, exist_ok=True)
+USER_CORRECTIONS_LOG = LEARNING_DATA_DIR / "user_corrections.jsonl"
+
+def _now_iso() -> str:
+    return datetime.utcnow().isoformat()
+
+def _rng_for_name(name: str) -> random.Random:
+    seed = abs(hash(name or time.time())) % (10**9)
+    return random.Random(seed)
+
+def _infer_attributes_from_filename(filename: str) -> Dict[str, Any]:
+    base = os.path.splitext(filename or "Item")[0]
+    tokens = [t for t in re.split(r"[\s_\-]+", base) if t]
+    rng = _rng_for_name(base)
+
+    brand = next((t.title() for t in tokens if len(t) > 2), None) or rng.choice(SAMPLE_BRANDS)
+    colour = rng.choice(SAMPLE_COLOURS)
+    item_type = next((t.title() for t in tokens[1:]), None) or rng.choice(SAMPLE_ITEMS)
+    title = " ".join(x for x in (brand, colour, item_type) if x)
+
+    price_mid = rng.randint(12, 65)
+    price_low = max(5, int(price_mid * 0.8))
+    price_high = int(price_mid * 1.25)
+
+    return dict(
+        title=title or "Draft",
+        brand=brand,
+        colour=colour,
+        size="M",
+        item_type=item_type,
+        price_mid=price_mid,
+        price_low=price_low,
+        price_high=price_high,
+    )
+
+def _parse_metadata(req) -> Dict[str, Any]:
+    raw = req.form.get("metadata") or ""
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+def _clean_value(val: Any, default: str) -> str:
+    if val is None:
+        return default
+    try:
+        text = str(val).strip()
+        return text or default
+    except Exception:
+        return default
+
+def _coerce_price(val: Any, fallback: int) -> int:
+    try:
+        num = float(val)
+        if num > 0:
+            return int(num)
+    except Exception:
+        pass
+    return int(fallback)
+
+def _extract_files(req) -> List:
+    """Return all uploaded files, preserving the primary `file` first."""
+    primary = req.files.getlist("file") or []
+    extras = req.files.getlist("files") or []
+
+    # Some clients send `file` as a single entry, so add it if not already present.
+    single_primary = req.files.get("file")
+    if single_primary and single_primary not in primary:
+        primary = primary + [single_primary]
+
+    seen = set()
+    files: List = []
+    for f in primary + extras:
+        if not f:
+            continue
+        key = id(f)
+        if key in seen:
+            continue
+        seen.add(key)
+        files.append(f)
+    return files
+
+def _draft_snapshot(draft: Dict[str, Any]) -> Dict[str, Any]:
+    keys = [
+        "id",
+        "title",
+        "description",
+        "brand",
+        "size",
+        "colour",
+        "condition",
+        "selected_price",
+        "price_low",
+        "price_mid",
+        "price_high",
+        "status",
+    ]
+    return {k: draft.get(k) for k in keys}
+
+def log_user_correction(prediction: Optional[Dict[str, Any]], before: Dict[str, Any], after: Dict[str, Any]) -> None:
+    try:
+        LEARNING_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        record = {
+            "draft_id": after.get("id") or before.get("id"),
+            "timestamp": _now_iso(),
+            "prediction": prediction,
+            "before": _draft_snapshot(before),
+            "after": _draft_snapshot(after),
+        }
+        with USER_CORRECTIONS_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception:
+        # Best-effort logging; avoid breaking API on logging failure.
+        pass
+
+def _save_upload(file_storage) -> Dict[str, str]:
+    filename = secure_filename(file_storage.filename or "upload.jpg")
+    stamped = f"{int(time.time() * 1000)}_{filename}"
+    target = UPLOAD_DIR / stamped
+    file_storage.save(target)
+    return {
+        "filename": stamped,
+        "path": str(target),
+        "url": f"/uploads/{stamped}",
+    }
+
+def _create_draft(files: List, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    global _next_draft_id
+    if not files:
+        raise ValueError("No files provided")
+
+    saved_files = [_save_upload(f) for f in files]
+    attrs = _infer_attributes_from_filename(files[0].filename)
+
+    brand = _clean_value(metadata.get("brand"), attrs["brand"])
+    colour = _clean_value(metadata.get("colour"), attrs["colour"])
+    size = _clean_value(metadata.get("size"), attrs["size"])
+    condition = _clean_value(metadata.get("condition"), "Good")
+    status = _clean_value(metadata.get("status"), "draft")
+    title = _clean_value(metadata.get("title"), attrs["title"])
+    description = _clean_value(
+        metadata.get("description"), f"{title} in {condition} condition."
+    )
+
+    price_mid = _coerce_price(metadata.get("price_mid"), attrs["price_mid"])
+    price_low = _coerce_price(metadata.get("price_low"), attrs["price_low"])
+    price_high = _coerce_price(metadata.get("price_high"), attrs["price_high"])
+    selected_price = metadata.get("selected_price")
+
+    draft_id = _next_draft_id
+    _next_draft_id += 1
+    now = _now_iso()
+
+    photos = [
+        {
+            "id": idx + 1,
+            "url": saved["url"],
+            "filename": saved["filename"],
+        }
+        for idx, saved in enumerate(saved_files)
+    ]
+
+    draft = {
+        "id": draft_id,
+        "title": title,
+        "brand": brand,
+        "size": size,
+        "colour": colour,
+        "condition": condition,
+        "status": status or "draft",
+        "description": description,
+        "price_low": price_low,
+        "price_mid": price_mid,
+        "price_high": price_high,
+        "selected_price": selected_price,
+        "photos": photos,
+        "photo_count": len(photos),
+        "cover_photo_url": photos[0]["url"] if photos else None,
+        "thumbnail_url": photos[0]["url"] if photos else None,
+        "created_at": now,
+        "updated_at": now,
+        "raw_attributes": attrs,
+    }
+    drafts[draft_id] = draft
+    return draft
+
+def _filtered_drafts(req) -> List[Dict[str, Any]]:
+    status = (req.args.get("status") or "").strip().lower()
+    brand = (req.args.get("brand") or "").strip().lower()
+    size = (req.args.get("size") or "").strip().lower()
+
+    items = list(drafts.values())
+    items.sort(key=lambda d: d.get("updated_at", ""), reverse=True)
+
+    def _matches(d: Dict[str, Any]) -> bool:
+        if status and (d.get("status") or "").lower() != status:
+            return False
+        if brand and brand not in (d.get("brand") or "").lower():
+            return False
+        if size and size not in (d.get("size") or "").lower():
+            return False
+        return True
+
+    items = [d for d in items if _matches(d)]
+    limit = req.args.get("limit")
+    offset = req.args.get("offset")
+    try:
+        limit_val = max(1, min(int(limit), 100)) if limit else len(items)
+    except Exception:
+        limit_val = len(items)
+    try:
+        offset_val = max(0, int(offset)) if offset else 0
+    except Exception:
+        offset_val = 0
+    return items[offset_val : offset_val + limit_val]
 
 # =========================
 # Math helpers
@@ -404,40 +638,95 @@ def get_comps(brand: str, item_type: str, size: str, colour: str) -> Dict[str, A
 # =========================
 # Routes
 # =========================
-def _now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+@app.route("/uploads/<path:filename>")
+def serve_upload(filename: str):
+    return send_from_directory(str(UPLOAD_DIR), filename)
 
 
-def _draft_summary(draft: Dict[str, Any]) -> Dict[str, Any]:
-    photos = draft.get("photos") or []
-    return {
-        "id": draft["id"],
-        "title": draft.get("title") or f"Draft #{draft['id']}",
-        "status": draft.get("status") or "draft",
-        "brand": draft.get("brand"),
-        "size": draft.get("size"),
-        "colour": draft.get("colour"),
-        "updated_at": draft.get("updated_at"),
-        "price_mid": draft.get("price_mid"),
-        "thumbnail_url": draft.get("thumbnail_url"),
-        "photo_count": len(photos) if isinstance(photos, list) else None,
-    }
+@app.post("/process_image")
+def process_image():
+    files = _extract_files(request)
+    if not files:
+        return jsonify({"error": "file is required"}), 400
+    metadata = _parse_metadata(request)
+    try:
+        draft = _create_draft(files, metadata)
+    except Exception as exc:  # pragma: no cover - simple guardrail
+        return jsonify({"error": str(exc) or "unable to create draft"}), 400
+    log_msg = f"[FlipLens] /process_image received {len(files)} files, created draft {draft.get('id')}"
+    app.logger.info(log_msg)
+    print(log_msg, flush=True)
+    return jsonify(draft), 201
 
 
-def _draft_detail(draft: Dict[str, Any]) -> Dict[str, Any]:
-    data = _draft_summary(draft)
-    data.update(
-        {
-            "description": draft.get("description"),
-            "condition": draft.get("condition"),
-            "price_low": draft.get("price_low"),
-            "price_high": draft.get("price_high"),
-            "selected_price": draft.get("selected_price"),
-            "photos": draft.get("photos") or [],
-            "raw": draft.get("raw"),
-        }
-    )
-    return data
+@app.post("/api/drafts")
+def create_draft_api():
+    files = _extract_files(request)
+    if not files:
+        return jsonify({"error": "At least one file is required"}), 400
+    metadata = _parse_metadata(request)
+    draft = _create_draft(files, metadata)
+    return jsonify(draft), 201
+
+
+@app.get("/api/drafts")
+def list_drafts():
+    items = _filtered_drafts(request)
+    return jsonify(items)
+
+
+@app.get("/api/drafts/<int:draft_id>")
+def get_draft(draft_id: int):
+    draft = drafts.get(draft_id)
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+    return jsonify(draft)
+
+
+@app.put("/api/drafts/<int:draft_id>")
+def update_draft(draft_id: int):
+    draft = drafts.get(draft_id)
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    before = copy.deepcopy(draft)
+    data = request.get_json(silent=True) or {}
+    updated = False
+
+    for field in ("title", "description", "status"):
+        if field in data and data[field] is not None:
+            draft[field] = data[field]
+            updated = True
+
+    if "price" in data and data["price"] is not None:
+        try:
+            draft["selected_price"] = float(data["price"])
+            updated = True
+        except Exception:
+            pass
+
+    if updated:
+        draft["updated_at"] = _now_iso()
+        changed_fields = [
+            field
+            for field in (
+                "title",
+                "description",
+                "brand",
+                "size",
+                "colour",
+                "condition",
+                "selected_price",
+                "price_low",
+                "price_mid",
+                "price_high",
+                "status",
+            )
+            if before.get(field) != draft.get(field)
+        ]
+        if changed_fields:
+            log_user_correction(prediction=None, before=before, after=draft)
+    return jsonify(draft)
 
 
 @app.get("/health")
@@ -461,135 +750,6 @@ def api_price():
 @app.get("/price")  # simple fallback/alias
 def price():
     return api_price()
-
-
-@app.get("/api/drafts")
-def list_drafts():
-    status_filter = (request.args.get("status") or "").strip().lower()
-    brand_filter = (request.args.get("brand") or "").strip().lower()
-    size_filter = (request.args.get("size") or "").strip().lower()
-
-    try:
-        limit = int(request.args.get("limit", "20"))
-    except Exception:
-        limit = 20
-    try:
-        offset = int(request.args.get("offset", "0"))
-    except Exception:
-        offset = 0
-    limit = max(1, min(limit, 100))
-    offset = max(0, offset)
-
-    items = list(drafts.values())
-    if status_filter:
-        items = [d for d in items if str(d.get("status") or "").lower() == status_filter]
-    if brand_filter:
-        items = [
-            d for d in items if brand_filter in str(d.get("brand") or "").lower()
-        ]
-    if size_filter:
-        items = [d for d in items if size_filter in str(d.get("size") or "").lower()]
-
-    items = sorted(items, key=lambda d: d.get("updated_at") or "", reverse=True)
-    sliced = items[offset : offset + limit]
-    return jsonify([_draft_summary(d) for d in sliced])
-
-
-@app.get("/api/drafts/<int:draft_id>")
-def get_draft(draft_id: int):
-    draft = drafts.get(draft_id)
-    if not draft:
-        return jsonify({"detail": "Not found"}), 404
-    return jsonify(_draft_detail(draft))
-
-
-@app.post("/api/drafts")
-def create_draft():
-    global next_draft_id
-
-    payload: Dict[str, Any] = {}
-    if request.is_json:
-        payload = request.get_json(silent=True) or {}
-
-    metadata_raw = request.form.get("metadata")
-    if metadata_raw:
-        try:
-            metadata_payload = json.loads(metadata_raw)
-            if isinstance(metadata_payload, dict):
-                payload.update(metadata_payload)
-        except Exception:
-            pass
-
-    title = payload.get("title") or f"Draft #{next_draft_id}"
-    status = payload.get("status") or "draft"
-    brand = payload.get("brand")
-    size = payload.get("size")
-    colour = payload.get("colour")
-    condition = payload.get("condition")
-    description = payload.get("description")
-    price_mid = payload.get("price_mid")
-    price_low = payload.get("price_low")
-    price_high = payload.get("price_high")
-    selected_price = payload.get("price") or payload.get("selected_price")
-
-    files = request.files.getlist("files")
-    photos: List[Dict[str, Any]] = []
-    for idx, file in enumerate(files):
-        photos.append(
-            {
-                "id": idx + 1,
-                "url": f"https://placehold.co/600x800?text=Draft+{next_draft_id}+Photo+{idx + 1}",
-                "original_filename": file.filename,
-            }
-        )
-
-    draft = {
-        "id": next_draft_id,
-        "title": title,
-        "status": status,
-        "brand": brand,
-        "size": size,
-        "colour": colour,
-        "condition": condition,
-        "description": description,
-        "price_mid": price_mid,
-        "price_low": price_low,
-        "price_high": price_high,
-        "selected_price": selected_price,
-        "photos": photos,
-        "thumbnail_url": photos[0]["url"] if photos else None,
-        "updated_at": _now_iso(),
-    }
-    drafts[next_draft_id] = draft
-    next_draft_id += 1
-
-    return jsonify(_draft_detail(draft)), 201
-
-
-@app.put("/api/drafts/<int:draft_id>")
-def update_draft(draft_id: int):
-    draft = drafts.get(draft_id)
-    if not draft:
-        return jsonify({"detail": "Not found"}), 404
-
-    data = request.get_json(silent=True) or {}
-    if "title" in data:
-        draft["title"] = data.get("title") or draft.get("title")
-    if "description" in data:
-        draft["description"] = data.get("description")
-    if "status" in data:
-        draft["status"] = data.get("status") or draft.get("status") or "draft"
-    if "price" in data:
-        try:
-            price_val = float(data.get("price"))
-            draft["selected_price"] = price_val
-            if not draft.get("price_mid"):
-                draft["price_mid"] = price_val
-        except Exception:
-            pass
-
-    draft["updated_at"] = _now_iso()
-    return jsonify(_draft_detail(draft))
 
 
 @app.errorhandler(404)

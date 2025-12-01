@@ -107,29 +107,61 @@ export async function createDraftFromUpload(
   return res.json();
 }
 
+export async function processImageToDraft(
+  serverBase: string | undefined,
+  files: UploadFileInput[],
+  metadata?: string,
+  options?: RequestOptions
+): Promise<DraftDetail> {
+  const base = normalizeBase(serverBase);
+  if (!files.length) {
+    throw new Error("At least one image is required.");
+  }
+  const formData = new FormData();
+  appendUploadFile(formData, "file", files[0]);
+  files.forEach((file) => appendUploadFile(formData, "files", file));
+  if (metadata) {
+    formData.append("metadata", metadata);
+  }
+  console.log(`[FlipLens] processImageToDraft sending ${files.length} photos`);
+  const res = await fetch(`${base}/process_image`, {
+    method: "POST",
+    body: formData,
+    headers: buildHeaders(options?.uploadKey),
+  });
+  await ensureOk(res);
+  return res.json();
+}
+
 const buildUploadFormData = (
   files: UploadFileInput[],
   metadata?: string
 ) => {
   const formData = new FormData();
-  files.forEach((file) => {
-    if ("blob" in file) {
-      formData.append("files", file.blob, file.name);
-    } else {
-      formData.append(
-        "files",
-        {
-          uri: file.uri,
-          name: file.name,
-          type: file.type,
-        } as any
-      );
-    }
-  });
+  files.forEach((file) => appendUploadFile(formData, "files", file));
   if (metadata) {
     formData.append("metadata", metadata);
   }
   return formData;
+};
+
+const appendUploadFile = (
+  formData: FormData,
+  key: string,
+  file: UploadFileInput
+) => {
+  if ("blob" in file) {
+    formData.append(key, file.blob, file.name);
+  } else {
+    formData.append(
+      key,
+      {
+        uri: file.uri,
+        name: file.name,
+        type: file.type,
+      } as any
+    );
+  }
 };
 
 type RequestOptions = {

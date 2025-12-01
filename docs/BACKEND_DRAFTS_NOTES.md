@@ -1,27 +1,19 @@
-# BACKEND DRAFTS NOTES
+# Backend draft flow
 
-## Mobile expectations
-- Base URL comes from `Config.apiBase` (defaults to `http://192.168.0.21:10000`); trailing slash is stripped.
-- `POST /api/drafts` is called from the Upload screen with `FormData`:
-  - Fields: `files` (one or many images), optional `metadata` JSON string (brand, size, condition, title, etc.).
-  - Response is parsed as a draft detail and the app looks for `id`/`draft_id`/`item_id`/`draft.id`.
-- `GET /api/drafts?status=<draft|ready>&limit=<n>&offset=<n>` lists drafts; response must be an array. Items use keys: `id`, `title`, `status`, `brand`, `size`, `colour`, `updated_at`, `price_mid`, `thumbnail_url`, `photo_count`.
-- `GET /api/drafts/{id}` returns a single draft detail with the summary fields plus `description`, `condition`, `price_low`, `price_high`, `selected_price`, and `photos` (array of `{id,url}`/`optimised_path`/`original_path`).
-- `PUT /api/drafts/{id}` sends JSON `{title?,description?,price?,status?}`; body is ignored, only HTTP 2xx matters.
-- All draft routes may include `X-Upload-Key` header; it is not validated yet.
-- Error handling: mobile surfaces `detail`/`error` from JSON bodies when status is not OK.
+- Endpoint: `POST /process_image` (also available at `POST /api/drafts` for compatibility).
+- Payload: `multipart/form-data` with at least one image as `file` (extras as `files`). Optional `metadata` JSON string supports `brand`, `size`, `colour`, `condition`, `description`, `status`, `title`, `price_mid`, `price_low`, `price_high`, `selected_price`.
+- Behaviour: saves uploads to `data/uploads`, infers a title/brand/colour/price range from the filename, creates an in-memory draft entry, and returns the full draft JSON including its `id`, photos, and prices.
+- Draft storage: kept in the `drafts` dict inside `app.py` with incremental IDs; thumbnails served from `/uploads/<filename>`.
+- Related endpoints: `GET /api/drafts` (lists with filters/pagination), `GET /api/drafts/{id}` (detail), `PUT /api/drafts/{id}` (update title/description/status/price), and `/health` for connectivity checks.
+- Mobile uses `POST /process_image` from the Upload screen; new drafts surface in the Drafts list via `GET /api/drafts`.
 
-## Implemented backend (app.py)
-- Added temporary in-memory store: `drafts: Dict[int, Dict[str, Any]]` and `next_draft_id`.
-- Routes (all under `/api/drafts`):
-  - `GET /api/drafts`: optional filters `status`, `brand`, `size`, pagination `limit` (default 20, max 100) and `offset`. Returns list of summaries (includes `photo_count` and `thumbnail_url`).
-  - `GET /api/drafts/<id>`: returns draft detail or `{ "detail": "Not found" }` with 404.
-  - `POST /api/drafts`: accepts JSON or `FormData` with `files` + optional `metadata` JSON string. Assigns an ID, stamps `updated_at`, stores brand/size/colour/condition/description/price fields when provided, and returns the created draft detail (201). Photos are acknowledged and mirrored back as placeholder URLs.
-  - `PUT /api/drafts/<id>`: updates title/description/status/price (price is stored as `selected_price` and used as `price_mid` if missing) and returns updated detail.
-- Added a global 404 handler that returns `{ "detail": "Not found" }` to keep mobile-friendly errors. `/health` remains unchanged.
+## Multi-photo payload + logging
 
-## Sample interactions
-- List: `curl -s http://192.168.0.21:10000/api/drafts`
-- Create (JSON): `curl -s -X POST http://192.168.0.21:10000/api/drafts -H "Content-Type: application/json" -d '{"title":"Test draft","brand":"Test","price_mid":55}'`
-- Create (FormData with metadata string): `curl -s -X POST http://192.168.0.21:10000/api/drafts -F 'files=@/path/photo.jpg' -F 'metadata={\"brand\":\"Nike\",\"size\":\"M\"}'`
-- Detail: `curl -s http://192.168.0.21:10000/api/drafts/1`
+- Send the primary image as `file` and any additional images as repeated `files` parts; order is preserved and the first photo is used as the cover.
+- Response includes `photos` (array of `{id,url,filename}`), `photo_count`, `thumbnail_url`, and `cover_photo_url`.
+- Log line to expect in the Flask console: `[FlipLens] /process_image received N files, created draft <id>`.
+
+## Sanity check
+
+- With the backend running locally (default `http://localhost:5055`): `python tools/dev_check_process_image_multi.py`
+- Override the base URL if needed: `python tools/dev_check_process_image_multi.py http://<your-host>:5055`
