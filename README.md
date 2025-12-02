@@ -120,9 +120,100 @@ Detailed instructions live in `docs/manuals/expo-upload.md`. Highlights:
 - Use `docs/manuals/phone-upload.md` for the tap-by-tap Shortcut flow.
 - Expo prototype (above) is the richer UI; both share the same API key + Pi endpoint.
 
-## Current status (2025-11-11)
+## Current status (2025-12-02)
 
-- **Image compliance** – every uploaded or sampled photo is checked (`app/compliance.py`) for minimum resolution and visible people/faces before the draft is created; violations are deleted immediately and posted to `DISCORD_WEBHOOK_ALERTS`.
-- **Sampler cadence** – `vinted-sampler.timer` runs `run_sampler_cycle.sh` every 30 minutes from 21:00–06:00, downloading ~60 clothing shots per cycle, running `/api/infer?fast=1`, logging results under `data/evals/<date>`, and pushing both per-image eval blurbs (fails highlighted) plus a learning snapshot to Discord.
-- **Draft quality** – new drafts automatically get Vinted-friendly titles (brand + colour + item + size), default condition (“Good”), and sanitized attributes; `Check Price` continues to hit the Flask cloud helper for comps.
-- **Learning dashboard** – visit `/learning` on the Pi to see sampler buckets, eval accuracy, and recently learned label text, plus a “Share snapshot to Discord” button for manual updates.
+FlipLens / Vinted AI Cloud is now a full vertical slice from phone → Pi backend → eval/learning, with a half-polished mobile client on top.
+
+**Backend & sampler**
+
+- Python API backend serving:
+  - `/health`, `/api/infer`, `/api/upload`, `/api/drafts`, `/api/events`, `/learning`, plus metrics at `/metrics`.
+  - Image compliance checks before a draft is created: low-res, face/people violations are deleted and posted to `DISCORD_WEBHOOK_ALERTS`.
+- Night sampler + eval loop is wired:
+  - `vinted-sampler.timer` calls `scripts/run_sampler_cycle.sh` on a schedule, pulls sample clothing photos, calls `/api/infer?fast=1`, and writes evals to `data/evals/<date>/eval-results.jsonl`.
+  - Each run can push a “learning snapshot” and per-image blurbs into Discord for quick review.
+- Marketplace eval tooling is live:
+  - `tools/marketplace_eval/run_eval.py` runs against stored data and writes Markdown reports under `tools/marketplace_eval/reports/` (latest report is checked in for reference).
+
+**Pi core & services**
+
+- Pi/mini-PC is the primary “core” target:
+  - Systemd units for sampler + heartbeat live under `scripts/systemd/` and can be enabled with `systemctl --user ...`.
+  - `tools/heartbeat_ping.py` appends pings to `.agent/agent-heartbeat.txt` and can mirror them to a Discord relay via `AGENT_RELAY_WEBHOOK_URL`.
+- Observability hooks:
+  - Prometheus metrics exposed at `/metrics`.
+  - Optional `observability/docker-compose.yml` stack (Prometheus + Grafana) is ready to run locally for dashboards/alerts.
+
+**Discord bridge & agents**
+
+- Discord bridge bot:
+  - `tools/discord_bridge_bot.py` listens for messages in configured channels and writes them under `.agent/discord-bridge/inbox/`.
+  - `tools/discord_bridge_send.py` posts replies back to Discord from the local filesystem queue.
+- Discord docs (`docs/discord_bridge.md`, `docs/discord_channels_review.md`, `docs/discord_guidelines.md`) describe:
+  - How the bridge is wired.
+  - How channels are meant to be used going forward.
+  - Which spaces are for logs, which are for human conversation.
+
+**Mobile (Expo client)**
+
+- Early React Native app in `mobile/`:
+  - **Upload screen**: multiple photo selection + send to `/api/upload`, now using shared design tokens for spacing, cards and buttons.
+  - **Drafts list**: scrollable card list showing thumbnail strips, brand/size/condition, description, price badge and server info card.
+  - **Draft detail**: structured, keyboard-aware form with:
+    - Horizontal photo gallery,
+    - Condition/status chips,
+    - GBP price input with prefix,
+    - Sticky action bar for save/post/export.
+  - **Connect / server settings**:
+    - Shows current backend, exposes “Test connection”, and reflects configuration from `.env` (using `EXPO_PUBLIC_API_BASE` etc.).
+- Mobile tests:
+  - Jest tests for `UploadScreen` and `DraftDetailScreen` pass.
+  - `npx tsc --noEmit` is clean.
+
+**Dev tooling & tests**
+
+- Python:
+  - Runtime deps in `requirements.txt` plus new dev bundle in `requirements-dev.txt`:
+    - `fastapi`, `pydantic`, `opencv-python`, `pillow`, `pytest`, `pytest-cov`.
+  - Backend test suite:
+    - `pytest tests -q` passes (only deprecation warnings from FastAPI/Pydantic).
+- Frontend:
+  - `mobile/` has Jest + TypeScript checks wired as above.
+- CLIs:
+  - `tools/dev_show_learning_status.py` and `tools/marketplace_eval/run_eval.py` run without crashing in the current setup.
+
+## Next focus (Dec 2025)
+
+Short term, the priority is making the “phone → Pi → listing” loop feel like a product, not a lab demo:
+
+1. **Smooth connection & startup**
+   - Harden the mobile “Test connection” flow:
+     - Add a real timeout, clear error messages, and always clear the spinner state.
+   - On app launch, auto-reuse the last known good backend and drop the user straight into the main flow when the Pi is reachable.
+
+2. **Photo quality & export fidelity**
+   - Review how images are resized/compressed for:
+     - On-device thumbnails.
+     - The content you copy over to Vinted.
+   - Adjust resize/compression so exported photos still look sharp enough for real listings.
+
+3. **End-to-end listing UX**
+   - Treat one item as the “golden path”:
+     - Take photos on the phone.
+     - Upload to Pi, generate draft.
+     - Confirm brand/size/title/price in the mobile app.
+     - Export a ready-to-paste block (title, description, price, tags) that you actually use in Vinted.
+   - Capture any manual steps you still have to do and feed those back into the roadmap.
+
+4. **Pi reliability**
+   - Make sure core services are running under systemd on the Pi (API + sampler + heartbeat, where needed).
+   - Verify:
+     - `/health` and `/metrics` are always up when the Pi is “on”.
+     - Logs and eval reports are rotating to disk cleanly.
+
+5. **Tighter agent loop**
+   - Standardise the dev workflow in this repo so agents always:
+     - Create/activate `.venv`.
+     - Install `requirements.txt` + `requirements-dev.txt`.
+     - Run `pytest`, mobile Jest tests, and `npx tsc --noEmit` before pushing.
+   - Keep this section updated whenever new tests or tools are added so agents don’t guess.
