@@ -246,3 +246,4 @@ Short term, the priority is making the “phone → Pi → listing” loop feel 
      - Install `requirements.txt` + `requirements-dev.txt`.
      - Run `pytest`, mobile Jest tests, and `npx tsc --noEmit` before pushing.
    - Keep this section updated whenever new tests or tools are added so agents don’t guess.
+   - See docs/december_war_plan.md for the detailed December roadmap.
