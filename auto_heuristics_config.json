@@ -279,5 +279,8 @@
     "xs": "XS",
     "xxl": "XXL"
   },
+  "guidelines": [
+    "After completing any major change (new endpoint, new background job, significant refactor, or new mobile flow), update README.md 'Current status' and 'Next focus' sections to describe the new behaviour. Do not consider the work done until the README reflects reality."
+  ],
   "version": 1
 }

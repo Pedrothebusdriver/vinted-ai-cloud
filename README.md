@@ -63,22 +63,51 @@ Need the bigger picture (hardware options, refactor plan, sampler/cloud helper r
 ## Development workflow
 
 1. Create/activate a venv and install runtime deps:
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt -r pi-app/requirements.txt
-   ```
-2. Install the lightweight dev tools (optional but recommended):
-   ```bash
-   python -m pip install --upgrade pytest
-   ```
-3. Run the targeted compliance test before pushing:
-   ```bash
-   python -m pytest tests/test_compliance.py
-   ```
-4. (Optional) add your preferred linters/formatters—none are enforced yet, so feel free to layer on `ruff`, `black`, etc., in your local venv.
 
-CI is minimal today; whenever you add additional tests or linting, capture the commands in this section so every agent can reproduce them locally.
+       python3 -m venv .venv
+       source .venv/bin/activate
+       python -m pip install -r requirements.txt -r pi-app/requirements.txt
+
+2. Install dev tools (for backend + eval):
+
+       python -m pip install -r requirements-dev.txt
+
+   This pulls in FastAPI/Pydantic dev bits plus pytest/pytest-cov, OpenCV
+   and Pillow so the tests and eval CLIs run in the same environment.
+
+3. Run backend tests before pushing:
+
+       pytest tests -q
+
+   You can still run the targeted compliance test alone with:
+
+       pytest tests/test_compliance.py
+
+4. Run mobile checks whenever you touch `mobile/`:
+
+       cd mobile
+       npm install
+       npm test -- --runTestsByPath src/screens/__tests__/UploadScreen.test.tsx
+       npm test -- --runTestsByPath src/screens/__tests__/DraftDetailScreen.test.tsx
+       npx tsc --noEmit
+
+   If you change other screens, add more test paths here over time.
+
+5. Document major changes:
+
+   If you add or change anything substantial (new endpoints, new flows,
+   new background jobs, mobile UI changes, etc.), you **must** update:
+
+   - "## Current status (YYYY-MM-DD)" with what now exists in the system.
+   - "## Next focus (Month YYYY)" if you've changed what Pete should care
+     about next.
+
+   Treat the README as the canonical “what exists + what’s next” view for
+   both agents and Pete. If it isn't captured here, assume future agents
+   won't know it exists.
+
+CI is minimal today; whenever you add additional tests or linting, capture
+the commands in this section so every agent can reproduce them locally.
 
 ## Automated heartbeat
 

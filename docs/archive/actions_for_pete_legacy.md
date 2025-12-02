@@ -1,3 +1,5 @@
+> Legacy task list. Current roadmap lives in README.md ("Current status" + "Next focus") and docs/deep_dive.md.
+
 # Actions for Pete – FlipLens MVP
 
 Single backlog for FlipLens. Each agent reads this file on startup, grabs the next open task for their role, and updates the checklist as work lands.
