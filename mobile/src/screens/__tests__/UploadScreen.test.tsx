@@ -108,13 +108,13 @@ describe("groupAssetsIntoItems", () => {
     const base = 1_000_000;
     const assets = [
       { uri: "1", name: "1.jpg", type: "image/jpeg", creationTime: base },
-      { uri: "2", name: "2.jpg", type: "image/jpeg", creationTime: base + 30_000 },
-      { uri: "3", name: "3.jpg", type: "image/jpeg", creationTime: base + 190_000 },
-      { uri: "4", name: "4.jpg", type: "image/jpeg", creationTime: base + 200_000 },
-      { uri: "5", name: "5.jpg", type: "image/jpeg", creationTime: base + 205_000 },
+      { uri: "2", name: "2.jpg", type: "image/jpeg", creationTime: base + 10_000 },
+      { uri: "3", name: "3.jpg", type: "image/jpeg", creationTime: base + 35_000 },
+      { uri: "4", name: "4.jpg", type: "image/jpeg", creationTime: base + 40_000 },
+      { uri: "5", name: "5.jpg", type: "image/jpeg", creationTime: base + 62_000 },
     ];
 
-    const groups = groupAssetsIntoItems(assets, 90, 2);
+    const groups = groupAssetsIntoItems(assets, 20, 2);
     expect(groups.length).toBe(3);
     expect(groups[0].map((a) => a.uri)).toEqual(["1", "2"]);
     expect(groups[1].map((a) => a.uri)).toEqual(["3", "4"]);

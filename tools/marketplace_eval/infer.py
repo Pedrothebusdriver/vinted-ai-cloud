@@ -1,9 +1,7 @@
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List
-
-from .loader import Example
+from typing import Dict, Iterable, List, Optional, Union
 
 
 @dataclass
@@ -13,6 +11,8 @@ class Prediction:
     brand: str
     condition: str
     price_range: str
+    price_gbp: Optional[float]
+    size: Optional[str] = None
 
 
 BRAND_KEYWORDS: Dict[str, str] = {
@@ -77,21 +77,33 @@ def _infer_price_range(tokens: Iterable[str]) -> str:
             amount = int(token)
             lower = max(0, amount - 10)
             upper = amount + 10
-            return f"${lower}-${upper}"
-    return "unknown"
+            return f"£{lower}-£{upper}"
+    return "£0-£0"
+
+
+def _infer_price_mid(tokens: Iterable[str]) -> Optional[float]:
+    for token in tokens:
+        if token.isdigit():
+            amount = int(token)
+            return float(amount)
+    return None
 
 
 class BaselineInferencer:
     """String-based placeholder inference that can be swapped for a real model."""
 
-    def predict(self, example: Example) -> Prediction:
-        tokens = _tokenise_path(Path(example.image_path).name)
+    def predict(self, example_or_path: Union[Path, str]) -> Prediction:
+        image_path = example_or_path
+        if hasattr(example_or_path, "image_path"):
+            image_path = getattr(example_or_path, "image_path")
+        tokens = _tokenise_path(Path(str(image_path)).name)
 
         colour = _find_match(tokens, COLOUR_KEYWORDS)
         category = _find_match(tokens, CATEGORY_KEYWORDS)
         brand = _find_match(tokens, BRAND_KEYWORDS)
         condition = _find_match(tokens, CONDITION_KEYWORDS)
         price_range = _infer_price_range(tokens)
+        price_mid = _infer_price_mid(tokens)
 
         return Prediction(
             colour=colour,
@@ -99,4 +111,6 @@ class BaselineInferencer:
             brand=brand,
             condition=condition,
             price_range=price_range,
+            price_gbp=price_mid,
+            size=None,
         )

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Button,
   Platform,
   RefreshControl,
   ScrollView,
@@ -16,6 +15,8 @@ import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Config } from "../config";
 import { useServer } from "../state/ServerContext";
 import { RootStackParamList } from "../navigation/types";
+import { colors, radius, shadows, spacing } from "../theme/tokens";
+import { ui } from "../theme/components";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Connect">;
 
@@ -188,7 +189,7 @@ export const ConnectScreen = ({ navigation }: Props) => {
   const contentPaddingBottom = footerInset + 120;
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={ui.screen}>
       <View style={styles.body}>
         <ScrollView
           keyboardShouldPersistTaps="handled"
@@ -200,65 +201,84 @@ export const ConnectScreen = ({ navigation }: Props) => {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
         >
-          <Text style={styles.heading}>FlipLens server</Text>
-          <Text style={styles.description}>
-            Enter the Pi or Core server URL. We&apos;ll remember this for
-            uploads and drafts.
+          <Text style={ui.headingXL}>FlipLens server</Text>
+          <Text style={ui.subheading}>
+            Enter the Pi or Core server URL. We&apos;ll remember this for uploads and drafts.
           </Text>
-          <TextInput
-            style={styles.input}
-            value={url}
-            onChangeText={setUrl}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="http://192.168.0.21:10000"
-          />
-          <Button
-            title={pending ? "Checking..." : "Test Connection"}
-            onPress={testConnection}
-            disabled={pending}
-          />
-          {pending && <ActivityIndicator style={{ marginTop: 12 }} />}
-          {status !== "idle" && (
-            <Text
-              style={[
-                styles.status,
-                status === "ok" ? styles.ok : styles.error,
-              ]}
-            >
-              {message}
-            </Text>
-          )}
-          {serverVersion && (
-            <Text
-              style={[
-                styles.version,
-                versionMismatch && styles.versionWarning,
-              ]}
-            >
-              Server version: {serverVersion} · Expected:{" "}
-              {Config.coreSchemaVersion}
-            </Text>
-          )}
-          <Button
-            title="Save this server"
-            onPress={onSaveServer}
-            disabled={!cleanUrl && !baseUrl}
-          />
-          <View style={styles.field}>
-            <Text style={styles.label}>Upload key (optional)</Text>
+          <View style={styles.infoRow}>
+            <View style={[ui.card, styles.infoCard]}>
+              <Text style={styles.cardLabel}>Current backend</Text>
+              <Text style={styles.cardValue}>{resolvedBase || "Not connected"}</Text>
+              {lastConnectedLabel && (
+                <Text style={styles.cardMeta}>Last check: {lastConnectedLabel}</Text>
+              )}
+            </View>
+            <View style={[ui.mutedCard, styles.quickCard]}>
+              <Text style={styles.cardLabel}>Upload key</Text>
+              <TextInput
+                style={styles.input}
+                value={key}
+                onChangeText={setKey}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="upload-secret"
+              />
+              <Text style={styles.helper}>
+                Sent as <Text style={styles.code}>X-Upload-Key</Text> on every request.
+              </Text>
+            </View>
+          </View>
+          <View style={[ui.card, styles.inlineCard]}>
+            <Text style={ui.label}>Server URL</Text>
             <TextInput
               style={styles.input}
-              value={key}
-              onChangeText={setKey}
+              value={url}
+              onChangeText={setUrl}
               autoCapitalize="none"
               autoCorrect={false}
-              placeholder="upload-secret"
+              placeholder="http://192.168.0.21:10000"
             />
-            <Text style={styles.helper}>
-              We send this as <Text style={styles.code}>X-Upload-Key</Text> on
-              every request once the server enforces auth.
-            </Text>
+            <View style={styles.buttonRow}>
+              <TouchableOpacity
+                style={[ui.primaryButton, pending && styles.disabled]}
+                onPress={testConnection}
+                disabled={pending}
+                activeOpacity={0.9}
+              >
+                <Text style={ui.primaryButtonText}>
+                  {pending ? "Testing connection..." : "Test Connection"}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={ui.secondaryButton}
+                onPress={onSaveServer}
+                disabled={!cleanUrl && !baseUrl}
+                activeOpacity={0.9}
+              >
+                <Text style={ui.secondaryButtonText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+            {pending && <ActivityIndicator style={{ marginTop: 12 }} />}
+            {status !== "idle" && (
+              <View
+                style={[
+                  styles.statusCard,
+                  status === "ok" ? styles.statusOk : styles.statusError,
+                ]}
+              >
+                <Text style={styles.statusText}>{message}</Text>
+                {serverVersion && (
+                  <Text
+                    style={[
+                      styles.version,
+                      versionMismatch && styles.versionWarning,
+                    ]}
+                  >
+                    Server version: {serverVersion} · Expected: {Config.coreSchemaVersion}
+                  </Text>
+                )}
+              </View>
+            )}
           </View>
           <View style={styles.divider} />
           {lastConnectedLabel && (
@@ -316,11 +336,18 @@ export const ConnectScreen = ({ navigation }: Props) => {
             },
           ]}
         >
-          <Button
-            title="Continue"
+          <TouchableOpacity
+            style={[
+              ui.primaryButton,
+              styles.footerButton,
+              (!hydrated || pending || !resolvedBase) && styles.disabled,
+            ]}
             onPress={proceed}
             disabled={!hydrated || pending || !resolvedBase}
-          />
+            activeOpacity={0.9}
+          >
+            <Text style={ui.primaryButtonText}>Continue</Text>
+          </TouchableOpacity>
         </View>
       </View>
     </SafeAreaView>
@@ -328,98 +355,129 @@ export const ConnectScreen = ({ navigation }: Props) => {
 };
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: "#fff",
-  },
   body: {
     flex: 1,
-    backgroundColor: "#fff",
+    backgroundColor: colors.background,
   },
   container: {
     flex: 1,
-    padding: 24,
-    gap: 16,
-  },
-  heading: {
-    fontSize: 28,
-    fontWeight: "700",
-  },
-  description: {
-    color: "#4b5563",
+    padding: spacing.xl,
+    gap: spacing.lg,
   },
   input: {
+    ...ui.input,
+    backgroundColor: colors.card,
+  },
+  buttonRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  disabled: {
+    opacity: 0.65,
+  },
+  statusCard: {
+    padding: spacing.md,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    padding: 14,
-    fontSize: 16,
+    gap: spacing.xs,
   },
-  status: {
-    padding: 12,
-    borderRadius: 8,
-  },
-  ok: {
+  statusOk: {
     backgroundColor: "#ecfdf5",
-    color: "#047857",
+    borderColor: "#bbf7d0",
   },
-  error: {
+  statusError: {
     backgroundColor: "#fef2f2",
-    color: "#b91c1c",
+    borderColor: "#fecdd3",
+  },
+  statusText: {
+    color: colors.text,
   },
   divider: {
     borderBottomWidth: 1,
-    borderColor: "#f3f4f6",
-    marginVertical: 12,
+    borderColor: colors.border,
+    marginVertical: spacing.md,
   },
   field: {
-    gap: 8,
+    gap: spacing.xs,
   },
   label: {
     fontSize: 16,
     fontWeight: "600",
+    color: colors.text,
   },
   helper: {
-    color: "#6b7280",
+    color: colors.muted,
   },
   meta: {
-    color: "#4b5563",
+    ...ui.meta,
   },
   version: {
-    color: "#2563eb",
+    color: colors.accent,
     fontWeight: "600",
   },
   versionWarning: {
-    color: "#b91c1c",
+    color: colors.danger,
+  },
+  infoCard: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  quickCard: {
+    flex: 1,
+    gap: spacing.sm,
+  },
+  infoRow: {
+    flexDirection: "row",
+    gap: spacing.md,
+    flexWrap: "wrap",
+  },
+  inlineCard: {
+    gap: spacing.sm,
+  },
+  cardLabel: {
+    ...ui.helper,
+    fontWeight: "700",
+  },
+  cardValue: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.text,
+    marginTop: spacing.xs,
+  },
+  cardMeta: {
+    color: colors.muted,
+    marginTop: spacing.xs,
   },
   savedList: {
-    gap: 12,
-    paddingVertical: 12,
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
   },
   savedHeading: {
-    fontSize: 16,
-    fontWeight: "600",
+    ...ui.label,
   },
   savedCard: {
     borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 10,
-    padding: 12,
-    gap: 4,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    gap: spacing.xs,
+    backgroundColor: colors.card,
   },
   savedCardActive: {
-    borderColor: "#2563eb",
-    backgroundColor: "#eff6ff",
+    borderColor: colors.accent,
+    backgroundColor: colors.accentMuted,
   },
   savedLabel: {
     fontWeight: "600",
+    color: colors.text,
   },
   savedUrl: {
-    color: "#4b5563",
+    color: colors.muted,
     fontSize: 13,
   },
   savedMeta: {
-    color: "#6b7280",
+    color: colors.muted,
     fontSize: 12,
   },
   code: {
@@ -428,20 +486,21 @@ const styles = StyleSheet.create({
       default: "monospace",
     }),
     fontWeight: "600",
+    color: colors.text,
   },
   footer: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    backgroundColor: "#fff",
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.sm,
+    backgroundColor: colors.card,
     borderTopWidth: 1,
-    borderColor: "#e5e7eb",
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: -2 },
+    borderColor: colors.border,
+    ...shadows.card,
+  },
+  footerButton: {
+    flex: 1,
   },
 });

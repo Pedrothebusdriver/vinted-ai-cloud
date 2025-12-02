@@ -1,0 +1,283 @@
+{
+  "base_price_gbp": {
+    "max": 45.0,
+    "min": 8.0
+  },
+  "brand_keywords": {
+    "adidas": "Adidas",
+    "all saints": "AllSaints",
+    "allsaints": "AllSaints",
+    "arket": "Arket",
+    "barbour": "Barbour",
+    "clarks": "Clarks",
+    "cos": "COS",
+    "dr martens": "Dr. Martens",
+    "dr. martens": "Dr. Martens",
+    "finisterre": "Finisterre",
+    "hunter": "Hunter",
+    "levi": "Levi's",
+    "levis": "Levi's",
+    "lululemon": "Lululemon",
+    "mulberry": "Mulberry",
+    "new balance": "New Balance",
+    "nike": "Nike",
+    "north face": "The North Face",
+    "patagonia": "Patagonia",
+    "reiss": "Reiss",
+    "ted baker": "Ted Baker",
+    "the north face": "The North Face",
+    "uniqlo": "Uniqlo",
+    "zara": "Zara"
+  },
+  "brand_price_overrides": {
+    "Adidas": {
+      "max": 53.7,
+      "min": 8.7
+    },
+    "AllSaints": {
+      "max": 1.5,
+      "min": 1.0
+    },
+    "Arket": {
+      "max": 53.76,
+      "min": 16.76
+    },
+    "Barbour": {
+      "max": 124.92,
+      "min": 24.92
+    },
+    "COS": {
+      "max": 34.56,
+      "min": 1.0
+    },
+    "Clarks": {
+      "max": 70.6,
+      "min": 33.6
+    },
+    "Disney": {
+      "max": 64.02,
+      "min": 27.02
+    },
+    "Dr. Martens": {
+      "max": 38.38,
+      "min": 1.38
+    },
+    "Finisterre": {
+      "max": 1.5,
+      "min": 1.0
+    },
+    "GAP": {
+      "max": 61.78,
+      "min": 24.79
+    },
+    "H&M": {
+      "max": 59.35,
+      "min": 22.35
+    },
+    "Hunter": {
+      "max": 70.1,
+      "min": 33.1
+    },
+    "Levi's": {
+      "max": 74.42,
+      "min": 19.42
+    },
+    "Lululemon": {
+      "max": 28.18,
+      "min": 1.0
+    },
+    "Marks & Spencer": {
+      "max": 65.82,
+      "min": 28.82
+    },
+    "Matalan": {
+      "max": 54.61,
+      "min": 17.61
+    },
+    "Mulberry": {
+      "max": 1.5,
+      "min": 1.0
+    },
+    "New Balance": {
+      "max": 46.56,
+      "min": 9.56
+    },
+    "Next": {
+      "max": 54.48,
+      "min": 17.48
+    },
+    "Nike": {
+      "max": 79.4,
+      "min": 31.4
+    },
+    "Patagonia": {
+      "max": 8.12,
+      "min": 1.0
+    },
+    "Primark": {
+      "max": 66.62,
+      "min": 29.62
+    },
+    "Reiss": {
+      "max": 1.5,
+      "min": 1.0
+    },
+    "Ted Baker": {
+      "max": 3.36,
+      "min": 1.0
+    },
+    "The North Face": {
+      "max": 115.7,
+      "min": 10.7
+    },
+    "Uniqlo": {
+      "max": 46.18,
+      "min": 9.18
+    },
+    "Zara": {
+      "max": 27.48,
+      "min": 1.0
+    }
+  },
+  "category_keywords": {
+    "bag": "Bag",
+    "blazer": "Blazer",
+    "boot": "Boots",
+    "boots": "Boots",
+    "coat": "Coat",
+    "dress": "Dress",
+    "fleece": "Fleece",
+    "gilet": "Gilet",
+    "hoodie": "Hoodie",
+    "jacket": "Jacket",
+    "jean": "Jeans",
+    "jeans": "Jeans",
+    "jumper": "Knitwear",
+    "jumper,": "Knitwear",
+    "jumper.": "Knitwear",
+    "knit": "Knitwear",
+    "legging": "Leggings",
+    "puffer": "Coat",
+    "sneaker": "Trainers",
+    "tote": "Bag",
+    "trainer": "Trainers",
+    "trouser": "Trousers"
+  },
+  "category_price_overrides": {
+    "Bag": {
+      "max": 1.5,
+      "min": 1.0
+    },
+    "Blazer": {
+      "max": 1.5,
+      "min": 1.0
+    },
+    "Boots": {
+      "max": 134.22,
+      "min": 44.22
+    },
+    "Coat": {
+      "max": 100.14,
+      "min": 1.0
+    },
+    "Dress": {
+      "max": 57.48,
+      "min": 1.0
+    },
+    "Fleece": {
+      "max": 8.12,
+      "min": 1.0
+    },
+    "Gilet": {
+      "max": 46.18,
+      "min": 9.18
+    },
+    "Hoodie": {
+      "max": 59.4,
+      "min": 29.4
+    },
+    "Jacket": {
+      "max": 55.5,
+      "min": 1.0
+    },
+    "Jeans": {
+      "max": 74.42,
+      "min": 22.42
+    },
+    "Knitwear": {
+      "max": 73.76,
+      "min": 23.76
+    },
+    "Leggings": {
+      "max": 28.18,
+      "min": 1.0
+    },
+    "Trainers": {
+      "max": 121.56,
+      "min": 29.56
+    },
+    "Trousers": {
+      "max": 3.36,
+      "min": 1.0
+    }
+  },
+  "colour_keywords": {
+    "beige": "Beige",
+    "black": "Black",
+    "blue": "Blue",
+    "brown": "Brown",
+    "cream": "Cream",
+    "gray": "Grey",
+    "green": "Green",
+    "grey": "Grey",
+    "multi": "Multi",
+    "multi-colour": "Multi",
+    "navy": "Navy",
+    "olive": "Green",
+    "orange": "Orange",
+    "pink": "Pink",
+    "purple": "Purple",
+    "red": "Red",
+    "sand": "Sand",
+    "tan": "Tan",
+    "white": "White",
+    "yellow": "Yellow"
+  },
+  "condition_keywords": {
+    "excellent": "Excellent",
+    "fair": "Fair",
+    "gently": "Good used",
+    "good": "Good used",
+    "good used": "Good used",
+    "new": "New",
+    "new with tags": "New with tags",
+    "nwot": "New",
+    "nwt": "New with tags",
+    "used": "Used",
+    "worn": "Used"
+  },
+  "condition_multipliers": {
+    "Excellent": 0.76,
+    "Fair": 0.8,
+    "Good used": 0.54,
+    "New": 1.15,
+    "New with tags": 1.42,
+    "Used": 1.0,
+    "Very good": 1.17
+  },
+  "size_keywords": {
+    "l": "L",
+    "m": "M",
+    "s": "S",
+    "uk 10": "UK 10",
+    "uk 12": "UK 12",
+    "uk 14": "UK 14",
+    "uk 16": "UK 16",
+    "uk 6": "UK 6",
+    "uk 8": "UK 8",
+    "xl": "XL",
+    "xs": "XS",
+    "xxl": "XXL"
+  },
+  "version": 1
+}

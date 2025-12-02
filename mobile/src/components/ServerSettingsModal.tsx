@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 import { useServer } from "../state/ServerContext";
+import { colors, radius, spacing } from "../theme/tokens";
 
 type Props = {
   visible: boolean;
@@ -68,7 +69,7 @@ export const ServerSettingsModal = ({ visible, onClose }: Props) => {
               value={url}
               onChangeText={setUrl}
               autoCapitalize="none"
-              placeholder="http://192.168.0.21:10000"
+              placeholder="http://fliplens-pi.local:10000"
             />
           </View>
           <View style={styles.field}>
@@ -100,13 +101,13 @@ const styles = StyleSheet.create({
   center: {
     flex: 1,
     justifyContent: "center",
-    padding: 24,
+    padding: spacing.xl,
   },
   card: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 20,
-    gap: 16,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    gap: spacing.md,
     shadowColor: "#000",
     shadowOpacity: 0.15,
     shadowRadius: 12,
@@ -117,29 +118,29 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   description: {
-    color: "#6b7280",
+    color: colors.muted,
   },
   field: {
-    gap: 6,
+    gap: spacing.xs,
   },
   label: {
     fontWeight: "600",
   },
   input: {
     borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 8,
-    padding: 12,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
   },
   error: {
-    color: "#b91c1c",
+    color: colors.danger,
     backgroundColor: "#fee2e2",
-    borderRadius: 8,
-    padding: 10,
+    borderRadius: radius.md,
+    padding: spacing.sm,
   },
   actions: {
     flexDirection: "row",
     justifyContent: "space-between",
-    gap: 12,
+    gap: spacing.sm,
   },
 });

@@ -13,8 +13,11 @@ export const Config = {
 };
 
 export const BulkUploadConfig = {
-  BULK_TIME_GAP_SECONDS: 90,
+  BULK_TIME_GAP_SECONDS: 20,
   MAX_PHOTOS_PER_DRAFT: 8,
+  GROUPING_MAX_PHOTOS_PER_ITEM: 8,
   MAX_BULK_PHOTOS: 80,
   INTER_REQUEST_DELAY_MS: 250,
 };
+// NOTE: Bulk grouping assumes a new item if the time gap between photos > BULK_TIME_GAP_SECONDS.
+// If users report different items being merged, consider lowering this further or moving to visual clustering.

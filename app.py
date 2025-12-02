@@ -1,6 +1,5 @@
 import copy
 import json
-import json
 import math
 import os
 import random
@@ -8,12 +7,21 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from bs4 import BeautifulSoup
 from flask import Flask, jsonify, request, send_from_directory
 from werkzeug.utils import secure_filename
+
+from tools.image_grouping import PhotoSample, compute_phash, group_photos_by_content
+
+try:
+    from PIL import Image
+except Exception:  # pragma: no cover - optional dependency
+    Image = None
+
+from inference_core import infer_listing, load_heuristics_config
 
 try:
     import cloudscraper
@@ -35,6 +43,13 @@ ENABLE_OUTLIER_FILTER = os.getenv("OUTLIER_FILTER", "1") == "1"
 # Optional soft clamp (drop obviously silly prices from HTML scraping)
 CLAMP_MIN = float(os.getenv("CLAMP_MIN", "2"))
 CLAMP_MAX = float(os.getenv("CLAMP_MAX", "500"))
+# Bulk grouping heuristics (mirrors mobile grouping).
+BULK_GROUP_TIME_GAP_SECONDS = int(os.getenv("BULK_GROUP_TIME_GAP_SECONDS", "20"))
+BULK_MAX_PHOTOS_PER_DRAFT = int(os.getenv("BULK_MAX_PHOTOS_PER_DRAFT", "8"))
+BULK_PHASH_THRESHOLD = int(os.getenv("BULK_PHASH_THRESHOLD", "10"))
+BULK_FALLBACK_TIME_GAP_SECONDS = float(os.getenv("BULK_FALLBACK_TIME_GAP_SECONDS", str(5 * 60)))
+# NOTE: Bulk grouping now relies on perceptual hashing for content similarity, with a small
+# fallback time-gap split when photos are extremely far apart in time.
 
 UA_LIST = [
     # tiny + realistic; rotated to avoid being blocked
@@ -66,10 +81,35 @@ app = Flask(__name__)
 # =========================
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "data/uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+THUMB_DIR = UPLOAD_DIR / "thumbs"
+THUMB_DIR.mkdir(parents=True, exist_ok=True)
+DRAFT_STATE_PATH = Path(os.getenv("DRAFT_STATE_PATH", "data/drafts.json"))
 
 drafts: Dict[int, Dict[str, Any]] = {}
 _next_draft_id = 1
 
+def _load_drafts_from_disk():
+    global drafts, _next_draft_id
+    if not DRAFT_STATE_PATH.exists():
+        return
+    try:
+        data = json.loads(DRAFT_STATE_PATH.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            drafts = {int(k): v for k, v in data.items()}
+            if drafts:
+                _next_draft_id = max(drafts.keys()) + 1
+    except Exception:
+        pass
+
+def _persist_drafts():
+    try:
+        DRAFT_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with DRAFT_STATE_PATH.open("w", encoding="utf-8") as f:
+            json.dump(drafts, f)
+    except Exception:
+        pass
+
+_load_drafts_from_disk()
 SAMPLE_BRANDS = ["Nike", "Adidas", "Zara", "H&M", "Uniqlo", "Levi's"]
 SAMPLE_COLOURS = ["Black", "Blue", "Charcoal", "Green", "Grey", "Red", "White"]
 SAMPLE_ITEMS = ["Hoodie", "Jacket", "Jeans", "T-Shirt", "Dress", "Sweater"]
@@ -77,6 +117,10 @@ SAMPLE_ITEMS = ["Hoodie", "Jacket", "Jeans", "T-Shirt", "Dress", "Sweater"]
 LEARNING_DATA_DIR = Path("tools/marketplace_eval/data")
 LEARNING_DATA_DIR.mkdir(parents=True, exist_ok=True)
 USER_CORRECTIONS_LOG = LEARNING_DATA_DIR / "user_corrections.jsonl"
+USER_PREDICTIONS_LOG = LEARNING_DATA_DIR / "user_predictions.jsonl"
+HEURISTICS_CONFIG_PATH = Path("auto_heuristics_config.json")
+_HEURISTICS_CONFIG_CACHE: Optional[Dict[str, Any]] = None
+_HEURISTICS_CONFIG_MTIME: Optional[float] = None
 
 def _now_iso() -> str:
     return datetime.utcnow().isoformat()
@@ -84,6 +128,17 @@ def _now_iso() -> str:
 def _rng_for_name(name: str) -> random.Random:
     seed = abs(hash(name or time.time())) % (10**9)
     return random.Random(seed)
+
+def _load_heuristics_config() -> Dict[str, Any]:
+    global _HEURISTICS_CONFIG_CACHE, _HEURISTICS_CONFIG_MTIME
+    try:
+        mtime = HEURISTICS_CONFIG_PATH.stat().st_mtime
+    except FileNotFoundError:
+        return load_heuristics_config()
+    if _HEURISTICS_CONFIG_CACHE is None or _HEURISTICS_CONFIG_MTIME != mtime:
+        _HEURISTICS_CONFIG_CACHE = load_heuristics_config(HEURISTICS_CONFIG_PATH)
+        _HEURISTICS_CONFIG_MTIME = mtime
+    return _HEURISTICS_CONFIG_CACHE or load_heuristics_config()
 
 def _infer_attributes_from_filename(filename: str) -> Dict[str, Any]:
     base = os.path.splitext(filename or "Item")[0]
@@ -140,6 +195,29 @@ def _coerce_price(val: Any, fallback: int) -> int:
         pass
     return int(fallback)
 
+def _build_thumbnail(source_path: Path, filename: str) -> Dict[str, Optional[str]]:
+    if Image is None:
+        return {"thumb": None, "thumb_2x": None}
+    try:
+        img = Image.open(source_path).convert("RGB")
+        width, height = img.size
+        size = min(width, height)
+        left = (width - size) // 2
+        top = (height - size) // 2
+        crop = img.crop((left, top, left + size, top + size))
+        thumb1 = crop.resize((400, 400))
+        thumb2 = crop.resize((800, 800))
+        target1 = THUMB_DIR / filename
+        target2 = THUMB_DIR / f"@2x_{filename}"
+        thumb1.save(target1, format="JPEG", quality=85)
+        thumb2.save(target2, format="JPEG", quality=85)
+        return {
+            "thumb": f"/uploads/thumbs/{filename}",
+            "thumb_2x": f"/uploads/thumbs/@2x_{filename}",
+        }
+    except Exception:
+        return {"thumb": None, "thumb_2x": None}
+
 def _extract_files(req) -> List:
     """Return all uploaded files, preserving the primary `file` first."""
     primary = req.files.getlist("file") or []
@@ -161,6 +239,41 @@ def _extract_files(req) -> List:
         seen.add(key)
         files.append(f)
     return files
+
+def _looks_like_kids(text: str) -> bool:
+    lowered = text.lower()
+    if any(token in lowered for token in ["girl", "girls", "kid", "kids"]):
+        return True
+    return bool(re.search(r"\b\d-\d\b", lowered) or re.search(r"\bage\b", lowered))
+
+def _build_title_description(
+    brand: str,
+    colour: str,
+    size: str,
+    condition: str,
+    item_type: str,
+    files: List,
+) -> Tuple[str, str]:
+    filenames = " ".join([getattr(f, "filename", "") or "" for f in files])
+    brand_clean = (brand or "").strip()
+    item = (item_type or "Item").strip()
+    colour_clean = (colour or "Lovely").strip()
+    size_clean = (size or "unspecified").strip()
+    condition_clean = (condition or "good").strip()
+    generic = "Girls" if (not brand_clean and _looks_like_kids(filenames)) else ""
+
+    if brand_clean:
+        title = f"{brand_clean} {item}".strip()
+        desc_brand = brand_clean
+    else:
+        title = f"{generic} {item}".strip() if generic else item.title()
+        desc_brand = generic or "Everyday"
+
+    description = (
+        f"{colour_clean} {desc_brand} {item} in {condition_clean} condition. "
+        f"Size {size_clean}. Ideal for everyday wear."
+    )
+    return title, description
 
 def _draft_snapshot(draft: Dict[str, Any]) -> Dict[str, Any]:
     keys = [
@@ -188,6 +301,11 @@ def log_user_correction(prediction: Optional[Dict[str, Any]], before: Dict[str, 
             "prediction": prediction,
             "before": _draft_snapshot(before),
             "after": _draft_snapshot(after),
+            "title": after.get("title") or before.get("title"),
+            "description": after.get("description") or before.get("description"),
+            "price_low": after.get("price_low"),
+            "price_mid": after.get("price_mid"),
+            "price_high": after.get("price_high"),
         }
         with USER_CORRECTIONS_LOG.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
@@ -195,38 +313,126 @@ def log_user_correction(prediction: Optional[Dict[str, Any]], before: Dict[str, 
         # Best-effort logging; avoid breaking API on logging failure.
         pass
 
+def log_user_prediction(draft: Dict[str, Any]) -> None:
+    try:
+        LEARNING_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        record = {
+            "draft_id": draft.get("id"),
+            "timestamp": _now_iso(),
+            "title": draft.get("title"),
+            "description": draft.get("description"),
+            "price_low": draft.get("price_low"),
+            "price_mid": draft.get("price_mid"),
+            "price_high": draft.get("price_high"),
+        }
+        with USER_PREDICTIONS_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception:
+        # Best-effort logging; avoid breaking API on logging failure.
+        pass
+
 def _save_upload(file_storage) -> Dict[str, str]:
     filename = secure_filename(file_storage.filename or "upload.jpg")
-    stamped = f"{int(time.time() * 1000)}_{filename}"
+    now_ts = time.time()
+    stamped = f"{int(now_ts * 1000)}_{filename}"
     target = UPLOAD_DIR / stamped
     file_storage.save(target)
+    thumb_data = _build_thumbnail(target, stamped)
     return {
         "filename": stamped,
+        "original_filename": filename,
         "path": str(target),
         "url": f"/uploads/{stamped}",
+        "thumbnail_url": thumb_data.get("thumb") or f"/uploads/{stamped}",
+        "thumbnail_url_2x": thumb_data.get("thumb_2x"),
+        "saved_at": now_ts,
     }
 
-def _create_draft(files: List, metadata: Dict[str, Any]) -> Dict[str, Any]:
+def _price_hint_from_metadata(metadata: Dict[str, Any], fallback: Optional[float]) -> Optional[float]:
+    for key in ("selected_price", "price_mid", "price"):
+        val = metadata.get(key)
+        try:
+            if val is None:
+                continue
+            return float(val)
+        except Exception:
+            continue
+    return float(fallback) if fallback is not None else None
+
+def _build_inference_payload(
+    metadata: Dict[str, Any], attrs: Dict[str, Any]
+) -> Dict[str, Any]:
+    price_hint = _price_hint_from_metadata(metadata, attrs.get("price_mid"))
+    return {
+        "title": metadata.get("title") or attrs.get("title"),
+        "description": metadata.get("description"),
+        "brand": metadata.get("brand") or attrs.get("brand"),
+        "size": metadata.get("size") or attrs.get("size"),
+        "colour": metadata.get("colour") or attrs.get("colour"),
+        "condition": metadata.get("condition") or "Good",
+        "category": metadata.get("category") or attrs.get("item_type"),
+        "price_gbp": price_hint,
+        "currency": "GBP",
+    }
+
+def _is_truthy_flag(val: Any) -> bool:
+    if isinstance(val, bool):
+        return val
+    if val is None:
+        return False
+    try:
+        text = str(val).strip().lower()
+    except Exception:
+        return False
+    return text in ("1", "true", "yes", "y", "on")
+
+
+def _should_use_bulk_grouping(metadata: Dict[str, Any]) -> bool:
+    flags = [
+        metadata.get("bulk"),
+        metadata.get("bulk_mode"),
+        metadata.get("bulk_upload"),
+        metadata.get("bulkUpload"),
+    ]
+    try:
+        flags.append(request.args.get("bulk"))
+    except Exception:
+        pass
+    return any(_is_truthy_flag(flag) for flag in flags)
+
+
+def _create_draft_from_saved_files(saved_files: List[Dict[str, Any]], metadata: Dict[str, Any]) -> Dict[str, Any]:
     global _next_draft_id
-    if not files:
+    if not saved_files:
         raise ValueError("No files provided")
 
-    saved_files = [_save_upload(f) for f in files]
-    attrs = _infer_attributes_from_filename(files[0].filename)
-
-    brand = _clean_value(metadata.get("brand"), attrs["brand"])
-    colour = _clean_value(metadata.get("colour"), attrs["colour"])
-    size = _clean_value(metadata.get("size"), attrs["size"])
-    condition = _clean_value(metadata.get("condition"), "Good")
+    primary_name = (
+        saved_files[0].get("original_filename") or saved_files[0].get("filename") or "upload.jpg"
+    )
+    attrs = _infer_attributes_from_filename(primary_name)
     status = _clean_value(metadata.get("status"), "draft")
-    title = _clean_value(metadata.get("title"), attrs["title"])
+
+    heuristic_payload = _build_inference_payload(metadata, attrs)
+    try:
+        prediction = infer_listing(heuristic_payload, config=_load_heuristics_config())
+    except Exception:
+        prediction = {}
+
+    brand = _clean_value(metadata.get("brand"), prediction.get("brand") or attrs["brand"])
+    colour = _clean_value(metadata.get("colour"), prediction.get("colour") or attrs["colour"])
+    size = _clean_value(metadata.get("size"), prediction.get("size") or attrs["size"])
+    condition = _clean_value(metadata.get("condition"), prediction.get("condition") or "Good")
+
+    title = _clean_value(metadata.get("title"), prediction.get("title") or attrs["title"])
     description = _clean_value(
-        metadata.get("description"), f"{title} in {condition} condition."
+        metadata.get("description"),
+        prediction.get("description") or f"{title} in {condition} condition.",
     )
 
-    price_mid = _coerce_price(metadata.get("price_mid"), attrs["price_mid"])
-    price_low = _coerce_price(metadata.get("price_low"), attrs["price_low"])
-    price_high = _coerce_price(metadata.get("price_high"), attrs["price_high"])
+    price_mid_infer = prediction.get("price_gbp")
+    price_mid = max(1, _coerce_price(metadata.get("price_mid"), price_mid_infer or attrs["price_mid"]))
+    price_low = max(1, _coerce_price(metadata.get("price_low"), int(price_mid * 0.9)))
+    price_high = max(price_low + 1, _coerce_price(metadata.get("price_high"), int(price_mid * 1.1)))
     selected_price = metadata.get("selected_price")
 
     draft_id = _next_draft_id
@@ -238,6 +444,8 @@ def _create_draft(files: List, metadata: Dict[str, Any]) -> Dict[str, Any]:
             "id": idx + 1,
             "url": saved["url"],
             "filename": saved["filename"],
+            "thumbnail_url": saved.get("thumbnail_url"),
+            "thumbnail_url_2x": saved.get("thumbnail_url_2x"),
         }
         for idx, saved in enumerate(saved_files)
     ]
@@ -257,14 +465,84 @@ def _create_draft(files: List, metadata: Dict[str, Any]) -> Dict[str, Any]:
         "selected_price": selected_price,
         "photos": photos,
         "photo_count": len(photos),
-        "cover_photo_url": photos[0]["url"] if photos else None,
-        "thumbnail_url": photos[0]["url"] if photos else None,
+        "cover_photo_url": photos[0].get("url") if photos else None,
+        "thumbnail_url": photos[0].get("thumbnail_url") if photos else None,
         "created_at": now,
         "updated_at": now,
         "raw_attributes": attrs,
     }
     drafts[draft_id] = draft
+    _persist_drafts()
     return draft
+
+
+def _create_draft(files: List, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    if not files:
+        raise ValueError("No files provided")
+
+    saved_files = [_save_upload(f) for f in files]
+    return _create_draft_from_saved_files(saved_files, metadata)
+
+
+def _build_photo_samples(saved_files: List[Dict[str, Any]]) -> List[PhotoSample]:
+    samples: List[PhotoSample] = []
+    for idx, saved in enumerate(saved_files):
+        taken_at = saved.get("taken_at")
+        if taken_at is None:
+            saved_at = saved.get("saved_at")
+            if saved_at is not None:
+                try:
+                    taken_at = float(saved_at)
+                except Exception:
+                    taken_at = None
+        samples.append(PhotoSample(id=idx, path=saved["path"], taken_at=taken_at))
+    return samples
+
+
+def _create_bulk_drafts(files: List, metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if not files:
+        return []
+
+    saved_files = [_save_upload(f) for f in files]
+    samples = _build_photo_samples(saved_files)
+
+    groups = group_photos_by_content(
+        samples,
+        max_photos_per_group=BULK_MAX_PHOTOS_PER_DRAFT,
+        hash_threshold=BULK_PHASH_THRESHOLD,
+        fallback_time_gap_seconds=BULK_FALLBACK_TIME_GAP_SECONDS,
+    )
+
+    try:
+        summary_msg = f"[bulk_grouping] photos={len(samples)} groups={len(groups)}"
+        app.logger.info(summary_msg)
+        print(summary_msg, flush=True)
+        for idx, group in enumerate(groups):
+            rep_hash = None
+            if group:
+                try:
+                    rep_hash = str(compute_phash(group[0].path))
+                except Exception:
+                    rep_hash = "error"
+            detail = f"[bulk_grouping] group {idx} size={len(group)} representative_hash={rep_hash}"
+            app.logger.info(detail)
+            print(detail, flush=True)
+    except Exception:
+        pass
+
+    drafts_created: List[Dict[str, Any]] = []
+    for group in groups:
+        mapped_files: List[Dict[str, Any]] = []
+        for sample in group:
+            try:
+                mapped_files.append(saved_files[int(sample.id)])
+            except Exception:
+                continue
+        if not mapped_files:
+            continue
+        draft = _create_draft_from_saved_files(mapped_files, metadata)
+        drafts_created.append(draft)
+    return drafts_created
 
 def _filtered_drafts(req) -> List[Dict[str, Any]]:
     status = (req.args.get("status") or "").strip().lower()
@@ -649,10 +927,25 @@ def process_image():
     if not files:
         return jsonify({"error": "file is required"}), 400
     metadata = _parse_metadata(request)
+    bulk_mode = _should_use_bulk_grouping(metadata)
     try:
+        if bulk_mode:
+            drafts_created = _create_bulk_drafts(files, metadata)
+            if not drafts_created:
+                return jsonify({"error": "unable to create drafts"}), 400
+            for draft in drafts_created:
+                log_user_prediction(draft)
+            log_msg = (
+                f"[FlipLens] /process_image bulk photos={len(files)} drafts={len(drafts_created)}"
+            )
+            app.logger.info(log_msg)
+            print(log_msg, flush=True)
+            return jsonify({"drafts": drafts_created, "count": len(drafts_created)}), 201
+
         draft = _create_draft(files, metadata)
     except Exception as exc:  # pragma: no cover - simple guardrail
         return jsonify({"error": str(exc) or "unable to create draft"}), 400
+    log_user_prediction(draft)
     log_msg = f"[FlipLens] /process_image received {len(files)} files, created draft {draft.get('id')}"
     app.logger.info(log_msg)
     print(log_msg, flush=True)
@@ -683,6 +976,30 @@ def get_draft(draft_id: int):
     return jsonify(draft)
 
 
+@app.put("/api/drafts/<int:draft_id>/photos")
+def update_draft_photos(draft_id: int):
+    draft = drafts.get(draft_id)
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+    payload = request.get_json(silent=True) or {}
+    photos = payload.get("photos")
+    cover_url = payload.get("cover_photo_url")
+    thumb_url = payload.get("thumbnail_url")
+    thumb_url_2x = payload.get("thumbnail_url_2x")
+
+    if photos and isinstance(photos, list):
+        draft["photos"] = photos
+    if cover_url:
+        draft["cover_photo_url"] = cover_url
+    if thumb_url:
+        draft["thumbnail_url"] = thumb_url
+    if thumb_url_2x:
+        draft["thumbnail_url_2x"] = thumb_url_2x
+    draft["updated_at"] = _now_iso()
+    _persist_drafts()
+    return jsonify(draft)
+
+
 @app.put("/api/drafts/<int:draft_id>")
 def update_draft(draft_id: int):
     draft = drafts.get(draft_id)
@@ -693,7 +1010,18 @@ def update_draft(draft_id: int):
     data = request.get_json(silent=True) or {}
     updated = False
 
-    for field in ("title", "description", "status"):
+    for field in (
+        "title",
+        "description",
+        "status",
+        "brand",
+        "size",
+        "colour",
+        "condition",
+        "thumbnail_url",
+        "thumbnail_url_2x",
+        "cover_photo_url",
+    ):
         if field in data and data[field] is not None:
             draft[field] = data[field]
             updated = True
@@ -726,6 +1054,7 @@ def update_draft(draft_id: int):
         ]
         if changed_fields:
             log_user_correction(prediction=None, before=before, after=draft)
+        _persist_drafts()
     return jsonify(draft)
 
 

@@ -36,6 +36,15 @@ def main():
     print(f"Predictions logged: {predictions} ({PREDICTIONS})")
     print(f"User corrections logged: {corrections} ({CORRECTIONS})")
 
+    if predictions:
+        print("Last predictions:")
+        for line in tail(PREDICTIONS, 3):
+            try:
+                obj = json.loads(line)
+                print(f"- draft_id={obj.get('draft_id')} ts={obj.get('timestamp')}")
+            except Exception:
+                print(f"- {line}")
+
     if corrections:
         print("Last corrections:")
         for line in tail(CORRECTIONS, 3):
@@ -44,6 +53,20 @@ def main():
                 print(f"- draft_id={obj.get('draft_id')} ts={obj.get('timestamp')}")
             except Exception:
                 print(f"- {line}")
+
+    if predictions and corrections:
+        print("Recent prediction/correction pairs:")
+        preds = tail(PREDICTIONS, 3)
+        corrs = tail(CORRECTIONS, 3)
+        for p_line, c_line in zip(preds, corrs):
+            try:
+                p = json.loads(p_line)
+                c = json.loads(c_line)
+                print(
+                    f"- draft {p.get('draft_id')} pred_ts={p.get('timestamp')} correction_ts={c.get('timestamp')}"
+                )
+            except Exception:
+                print(f"- pred={p_line} correction={c_line}")
 
 
 if __name__ == "__main__":

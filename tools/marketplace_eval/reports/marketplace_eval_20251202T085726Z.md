@@ -1,18 +1,18 @@
 # Marketplace Evaluation Report
-Generated at: 2025-12-02T14:44:52Z
+Generated at: 2025-12-02T08:57:26Z
 
 ## Summary
-- Examples processed: 192
-- Price (overall): Mean abs error: £19.02, bias: -£9.29 over 186 price pairs
+- Examples processed: 156
+- Price (overall): Mean abs error: £20.02, bias: -£15.08 over 150 price pairs
 - Field accuracy (overall):
 | Field | Accuracy | Correct / Total |
 |---|---|---|
-| title | 100.0% | 188 / 188 |
-| description | 100.0% | 185 / 185 |
-| brand | 98.4% | 184 / 187 |
-| size | 100.0% | 178 / 178 |
-| colour | 97.9% | 183 / 187 |
-| condition | 62.6% | 117 / 187 |
+| title | 100.0% | 152 / 152 |
+| description | 100.0% | 150 / 150 |
+| brand | 98.7% | 150 / 152 |
+| size | 100.0% | 143 / 143 |
+| colour | 100.0% | 152 / 152 |
+| condition | 65.1% | 99 / 152 |
 
 ## Self-play summary
 - Examples: 150
@@ -41,20 +41,6 @@ Field accuracy:
 | size | 0.0% | 0 / 0 |
 | colour | 0.0% | 0 / 0 |
 | condition | 0.0% | 0 / 0 |
-
-## User export summary
-- Examples: 36
-- Mean abs error: £14.86, bias: +£14.86 over 36 price pairs
-
-Field accuracy:
-| Field | Accuracy | Correct / Total |
-|---|---|---|
-| title | 100.0% | 36 / 36 |
-| description | 100.0% | 35 / 35 |
-| brand | 97.1% | 34 / 35 |
-| size | 100.0% | 35 / 35 |
-| colour | 88.6% | 31 / 35 |
-| condition | 51.4% | 18 / 35 |
 
 ## Curated examples
 - Examples: 2
@@ -102,23 +88,6 @@ No description misses found.
 
 Top price misses:
 No price examples available.
-
-Title misses:
-No title misses found.
-
-Description misses:
-No description misses found.
-
-### User_Export examples
-
-Top price misses:
-| Example | Title (pred) | Price pred | Price truth | Error |
-|---|---|---|---|---|
-| user-export-0014 | Girls coat | £29.72 | £2.00 | +£27.72 |
-| user-export-0019 | Girls Primark skinny Jeans | £26.20 | £2.00 | +£24.20 |
-| user-export-0004 | Marks an Spencer Grey Smile Jumper | £27.09 | £3.00 | +£24.09 |
-| user-export-0030 | Gap Dress | £22.41 | £2.00 | +£20.41 |
-| user-export-0002 | Girls coat | £25.19 | £5.00 | +£20.19 |
 
 Title misses:
 No title misses found.

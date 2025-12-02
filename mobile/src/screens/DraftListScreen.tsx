@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
-  Button,
   FlatList,
   Image,
+  Platform,
   RefreshControl,
   StyleSheet,
   Text,
@@ -23,6 +23,8 @@ import { useServer } from "../state/ServerContext";
 import { RootStackParamList } from "../navigation/types";
 import { ServerSettingsModal } from "../components/ServerSettingsModal";
 import { DraftFilterSheet } from "../components/DraftFilterSheet";
+import { colors, radius, shadows, spacing } from "../theme/tokens";
+import { ui } from "../theme/components";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Drafts">;
 type FilterValue = "all" | DraftStatus;
@@ -185,156 +187,225 @@ export const DraftListScreen = ({ navigation }: Props) => {
     loadDrafts({ append: true });
   }, [loadDrafts, loading, loadingMore]);
 
-  const renderItem = ({ item }: { item: DraftSummary }) => (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => navigation.navigate("DraftDetail", { id: item.id })}
-    >
-      <View style={styles.thumbnailWrapper}>
-        {item.thumbnail_url ? (
-          <Image
-            source={{ uri: item.thumbnail_url }}
-            style={styles.thumbnail}
-          />
-        ) : (
-          <View style={styles.thumbnailPlaceholder}>
-            <Text style={styles.thumbnailPlaceholderText}>
-              {item.photo_count
-                ? `${item.photo_count} photo${
-                    item.photo_count > 1 ? "s" : ""
-                  }`
-                : "Photos"}
-            </Text>
+  const formatPrice = (value?: number) => {
+    if (typeof value === "number") {
+      const rounded = Number.isInteger(value) ? value : value.toFixed(2);
+      return `£${rounded}`;
+    }
+    return "Price TBD";
+  };
+
+  const renderItem = ({ item }: { item: DraftSummary }) => {
+    const snippet = ((item as any).description as string | undefined) || "";
+    const thumbUrl =
+      (item as any).thumbnail_url_2x ||
+      (item as any).thumbnail_url ||
+      (item as any).cover_photo_url ||
+      item.thumbnail_url ||
+      null;
+    const photos = thumbUrl ? [thumbUrl] : [];
+    const placeholders = ["#dbeafe", "#e5e7eb", "#e0e7ff"];
+
+    return (
+      <TouchableOpacity
+        style={styles.card}
+        activeOpacity={0.85}
+        onPress={() => navigation.navigate("DraftDetail", { id: item.id })}
+      >
+        <View style={styles.cardContent}>
+          <View style={styles.thumbColumn}>
+            {(photos.length ? photos : placeholders).slice(0, 2).map((thumb, idx) =>
+              photos.length ? (
+                <Image key={idx} source={{ uri: thumb as string }} style={styles.thumb} />
+              ) : (
+                <View key={idx} style={[styles.thumb, { backgroundColor: thumb as string }]} />
+              )
+            )}
+            {item.photo_count ? (
+              <View style={styles.photoBadge}>
+                <Text style={styles.photoBadgeText}>
+                  {item.photo_count} photo{item.photo_count > 1 ? "s" : ""}
+                </Text>
+              </View>
+            ) : null}
           </View>
-        )}
-      </View>
-      <View style={styles.cardBody}>
-        <View style={styles.cardHeader}>
-          <Text style={styles.cardTitle}>{item.title}</Text>
-          <StatusChip status={item.status} />
+          <View style={styles.cardBody}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle} numberOfLines={1}>
+                {item.title || "Untitled draft"}
+              </Text>
+              <StatusChip status={item.status} />
+            </View>
+            <View style={styles.pillRow}>
+              <AttributePill label={item.brand || "Brand ?"} />
+              <AttributePill label={item.size || "Size ?"} />
+              <AttributePill label={item.colour || "Colour ?"} />
+            </View>
+            {item.condition ? (
+              <Text style={styles.meta} numberOfLines={1}>
+                Condition: {item.condition}
+              </Text>
+            ) : (
+              <Text style={styles.meta} numberOfLines={1}>
+                Condition ?
+              </Text>
+            )}
+            {snippet ? (
+              <Text style={styles.snippet} numberOfLines={2}>
+                {snippet}
+              </Text>
+            ) : (
+              <Text style={styles.meta} numberOfLines={1}>
+                No description yet.
+              </Text>
+            )}
+            <View style={styles.priceRow}>
+              <Text style={styles.price}>{formatPrice(item.price_mid)}</Text>
+              {item.updated_at ? (
+                <Text style={styles.badge}>Updated {item.updated_at}</Text>
+              ) : null}
+            </View>
+          </View>
         </View>
-        <Text style={styles.meta}>
-          {item.brand || "Unknown brand"} · {item.size || "Size ?"}
-        </Text>
-        <Text style={styles.meta}>{item.colour || "Colour ?"}</Text>
-        <Text style={styles.price}>
-          {item.price_mid ? `£${item.price_mid}` : "Price TBD"}
-        </Text>
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <Text style={styles.heading}>Drafts</Text>
-        <View style={styles.headerActions}>
-          <Button title="Settings" onPress={() => setSettingsOpen(true)} />
-          <Button
-            title="Upload photos"
-            onPress={() => navigation.navigate("Upload")}
-          />
-        </View>
-      </View>
-      <Text style={styles.server}>Server: {baseUrl}</Text>
-      <View style={styles.filterRow}>
-        {FILTERS.map((option) => (
-          <TouchableOpacity
-            key={option.value}
-            style={[
-              styles.filterChip,
-              filter === option.value && styles.filterChipActive,
-            ]}
-            onPress={() => setFilter(option.value)}
-          >
-            <Text
-              style={[
-                styles.filterText,
-                filter === option.value && styles.filterTextActive,
-              ]}
-            >
-              {option.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-        <TouchableOpacity
-          style={[
-            styles.filterButton,
-            hasAdvancedFilters && styles.filterButtonActive,
-          ]}
-          onPress={() => setFiltersOpen(true)}
-        >
-          <Text
-            style={[
-              styles.filterButtonText,
-              hasAdvancedFilters && styles.filterButtonTextActive,
-            ]}
-          >
-            Filters
-          </Text>
-        </TouchableOpacity>
-      </View>
-      {hasAdvancedFilters && (
-        <Text style={styles.filterSummary}>
-          Active filters:
-          {advancedFilters.brand ? ` Brand=${advancedFilters.brand}` : ""}
-          {advancedFilters.size ? ` Size=${advancedFilters.size}` : ""}
-        </Text>
-      )}
-      {loading && <ActivityIndicator style={{ marginVertical: 12 }} />}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      <FlatList
-        data={drafts}
-        keyExtractor={(item) => String(item.id)}
-        renderItem={renderItem}
-        contentContainerStyle={styles.list}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        onEndReached={onEndReached}
-        onEndReachedThreshold={0.4}
-        ListFooterComponent={
-          loadingMore || !hasMore ? (
-            <View style={styles.footer}>
-              {loadingMore ? (
-                <ActivityIndicator />
-              ) : (
-                <Text style={styles.footerText}>No more drafts.</Text>
+    <SafeAreaView style={ui.screen}>
+      <View style={styles.screen}>
+        <FlatList
+          data={drafts}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={renderItem}
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
+          ItemSeparatorComponent={() => <View style={styles.listGap} />}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          onEndReached={onEndReached}
+          onEndReachedThreshold={0.4}
+          ListHeaderComponent={
+            <View style={styles.listHeader}>
+              <View style={styles.headingRow}>
+                <View style={{ flex: 1, gap: spacing.xs }}>
+                  <Text style={styles.heading}>Drafts</Text>
+                  <Text style={styles.subheading}>
+                    Clean cards with all your edits in one place.
+                  </Text>
+                </View>
+                <View style={styles.headerButtons}>
+                  <TouchableOpacity
+                    style={ui.secondaryButton}
+                    onPress={() => setSettingsOpen(true)}
+                  >
+                    <Text style={ui.secondaryButtonText}>Server</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={ui.primaryButton}
+                    onPress={() => navigation.navigate("Upload")}
+                  >
+                    <Text style={ui.primaryButtonText}>Upload photos</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <View style={styles.serverCard}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.serverLabel}>Current backend</Text>
+                  <Text style={styles.serverValue}>
+                    {baseUrl || "Not connected"}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.filterRow}>
+                {FILTERS.map((option) => (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[ui.pill, filter === option.value && ui.pillActive]}
+                    onPress={() => setFilter(option.value)}
+                  >
+                    <Text
+                      style={[
+                        ui.pillText,
+                        filter === option.value && ui.pillTextActive,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  style={[
+                    styles.filterButton,
+                    hasAdvancedFilters && styles.filterButtonActive,
+                  ]}
+                  onPress={() => setFiltersOpen(true)}
+                >
+                  <Text
+                    style={[
+                      styles.filterButtonText,
+                      hasAdvancedFilters && styles.filterButtonTextActive,
+                    ]}
+                  >
+                    Filters
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {hasAdvancedFilters && (
+                <Text style={styles.filterSummary}>
+                  Active filters:
+                  {advancedFilters.brand ? ` Brand=${advancedFilters.brand}` : ""}
+                  {advancedFilters.size ? ` Size=${advancedFilters.size}` : ""}
+                </Text>
               )}
+              {loading && <ActivityIndicator style={{ marginVertical: spacing.md }} />}
+              {error ? <Text style={styles.error}>{error}</Text> : null}
             </View>
-          ) : null
-        }
-        ListEmptyComponent={
-          loading ? (
-            <View style={styles.skeletonContainer}>
-              {SKELETON_ITEMS.map((_, idx) => (
-                <SkeletonCard key={idx} />
-              ))}
-            </View>
-          ) : (
-            <View style={styles.empty}>
-              <Text style={styles.emptyText}>
-                No drafts yet. Tap &quot;Upload photos&quot; to start.
-              </Text>
-            </View>
-          )
-        }
-      />
-      <ServerSettingsModal
-        visible={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-      />
-      <DraftFilterSheet
-        visible={filtersOpen}
-        status={filter}
-        statusOptions={FILTERS}
-        onStatusChange={(value) => setFilter(value as FilterValue)}
-        brand={advancedFilters.brand}
-        size={advancedFilters.size}
-        onApply={(filters) => setAdvancedFilters(filters)}
-        onClear={() => setAdvancedFilters({})}
-        onClose={() => setFiltersOpen(false)}
-      />
+          }
+          ListFooterComponent={
+            loadingMore || !hasMore ? (
+              <View style={styles.footer}>
+                {loadingMore ? (
+                  <ActivityIndicator />
+                ) : (
+                  <Text style={styles.footerText}>No more drafts.</Text>
+                )}
+              </View>
+            ) : null
+          }
+          ListEmptyComponent={
+            loading ? (
+              <View style={styles.skeletonContainer}>
+                {SKELETON_ITEMS.map((_, idx) => (
+                  <SkeletonCard key={idx} />
+                ))}
+              </View>
+            ) : (
+              <View style={styles.empty}>
+                <Text style={styles.emptyText}>
+                  No drafts yet. Tap &quot;Upload photos&quot; to start.
+                </Text>
+              </View>
+            )
+          }
+        />
+        <ServerSettingsModal
+          visible={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+        />
+        <DraftFilterSheet
+          visible={filtersOpen}
+          status={filter}
+          statusOptions={FILTERS}
+          onStatusChange={(value) => setFilter(value as FilterValue)}
+          brand={advancedFilters.brand}
+          size={advancedFilters.size}
+          onApply={(filters) => setAdvancedFilters(filters)}
+          onClear={() => setAdvancedFilters({})}
+          onClose={() => setFiltersOpen(false)}
+        />
+      </View>
     </SafeAreaView>
   );
 };
@@ -368,6 +439,12 @@ const StatusChip = ({ status }: { status?: string }) => {
   );
 };
 
+const AttributePill = ({ label }: { label: string }) => (
+  <View style={styles.attributePill}>
+    <Text style={styles.attributePillText}>{label}</Text>
+  </View>
+);
+
 const SkeletonCard = () => {
   const shimmer = useRef(new Animated.Value(0)).current;
 
@@ -397,7 +474,11 @@ const SkeletonCard = () => {
 
   return (
     <Animated.View style={[styles.card, styles.skeletonCard, { opacity }]}>
-      <View style={[styles.thumbnailWrapper, styles.skeletonThumb]} />
+      <View style={styles.thumbRow}>
+        <View style={[styles.thumb, styles.skeletonThumb]} />
+        <View style={[styles.thumb, styles.skeletonThumb]} />
+        <View style={[styles.thumb, styles.skeletonThumb]} />
+      </View>
       <View style={[styles.cardBody, styles.skeletonBody]}>
         <View style={styles.skeletonLineWide} />
         <View style={styles.skeletonLine} />
@@ -409,137 +490,185 @@ const SkeletonCard = () => {
 };
 
 const styles = StyleSheet.create({
-  safe: {
+  screen: {
     flex: 1,
-    backgroundColor: "#fff",
+    backgroundColor: colors.background,
   },
-  header: {
-    padding: 20,
-    gap: 12,
+  list: {
+    flex: 1,
   },
-  heading: {
-    fontSize: 24,
+  listContent: {
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.xxl,
+    gap: spacing.md,
+  },
+  listHeader: {
+    gap: spacing.md,
+    paddingTop: spacing.md,
+  },
+  headingRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.md,
+  },
+  heading: { ...ui.headingXL },
+  subheading: { ...ui.subheading },
+  headerButtons: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  serverCard: {
+    ...ui.card,
+  },
+  serverLabel: {
+    ...ui.helper,
     fontWeight: "700",
   },
-  headerActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 12,
-  },
-  server: {
-    paddingHorizontal: 20,
-    color: "#6b7280",
+  serverValue: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginTop: spacing.xs,
+    color: colors.text,
   },
   filterRow: {
     flexDirection: "row",
-    paddingHorizontal: 20,
-    gap: 8,
-    marginTop: 12,
-  },
-  filterChip: {
-    borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 999,
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-  },
-  filterChipActive: {
-    backgroundColor: "#111827",
-    borderColor: "#111827",
+    flexWrap: "wrap",
+    gap: spacing.sm,
   },
   filterButton: {
     borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 999,
-    paddingVertical: 6,
-    paddingHorizontal: 16,
+    borderColor: colors.border,
+    borderRadius: radius.pill,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.card,
   },
   filterButtonActive: {
-    borderColor: "#2563eb",
-    backgroundColor: "#eff6ff",
+    borderColor: colors.accent,
+    backgroundColor: colors.accentMuted,
   },
   filterButtonText: {
     fontWeight: "600",
-    color: "#111827",
+    color: colors.text,
   },
   filterButtonTextActive: {
-    color: "#2563eb",
+    color: colors.accent,
   },
   filterSummary: {
-    paddingHorizontal: 20,
-    color: "#2563eb",
-    marginTop: 8,
-  },
-  filterText: {
-    color: "#374151",
-    fontWeight: "600",
-  },
-  filterTextActive: {
-    color: "#fff",
+    color: colors.accent,
+    marginTop: -spacing.xs,
   },
   error: {
-    margin: 20,
     backgroundColor: "#fef2f2",
-    color: "#991b1b",
-    padding: 12,
-    borderRadius: 8,
-  },
-  list: {
-    padding: 20,
-    gap: 12,
-  },
-  card: {
-    flexDirection: "row",
+    color: colors.danger,
+    padding: spacing.sm,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 12,
+    borderColor: "#fecdd3",
+  },
+  listGap: { height: spacing.md },
+  card: {
+    ...ui.card,
     overflow: "hidden",
-    minHeight: 140,
   },
-  thumbnailWrapper: {
-    width: 112,
-    backgroundColor: "#f3f4f6",
+  cardContent: {
+    flexDirection: "row",
+    gap: spacing.md,
   },
-  thumbnail: {
-    width: "100%",
-    height: "100%",
+  thumbColumn: {
+    width: 118,
+    gap: spacing.xs,
   },
-  thumbnailPlaceholder: {
-    alignItems: "center",
-    justifyContent: "center",
+  thumbRow: {
+    flexDirection: "row",
+    gap: spacing.xs,
+    padding: spacing.sm,
+  },
+  thumb: {
     flex: 1,
-    padding: 12,
+    height: 84,
+    borderRadius: radius.md,
+    backgroundColor: colors.background,
   },
-  thumbnailPlaceholderText: {
-    color: "#6b7280",
-    textAlign: "center",
+  photoBadge: {
+    position: "absolute",
+    right: spacing.xs,
+    top: spacing.xs,
+    backgroundColor: "rgba(17,24,39,0.85)",
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: radius.pill,
+  },
+  photoBadgeText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 12,
   },
   cardBody: {
     flex: 1,
-    padding: 16,
-    gap: 4,
+    gap: spacing.xs,
   },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: spacing.sm,
   },
   cardTitle: {
     fontSize: 18,
-    fontWeight: "600",
+    fontWeight: "800",
+    flex: 1,
+    color: colors.text,
   },
   meta: {
-    color: "#4b5563",
+    ...ui.meta,
+  },
+  snippet: {
+    color: colors.text,
+  },
+  priceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: spacing.xs,
   },
   price: {
-    marginTop: 8,
-    fontWeight: "700",
-    color: "#111827",
+    fontWeight: "800",
+    fontSize: 17,
+    color: colors.text,
+  },
+  badge: {
+    backgroundColor: colors.accentMuted,
+    color: colors.accent,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    fontSize: 12,
+  },
+  pillRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
+  attributePill: {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: Platform.select({ ios: 6, default: 5 }),
+  },
+  attributePillText: {
+    color: colors.text,
+    fontWeight: "600",
+    fontSize: 12,
   },
   statusChip: {
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 999,
+    borderRadius: radius.pill,
+    minWidth: 72,
+    alignItems: "center",
   },
   statusDraft: {
     backgroundColor: "#fef3c7",
@@ -554,53 +683,58 @@ const styles = StyleSheet.create({
     color: "#166534",
   },
   statusChipText: {
-    fontWeight: "600",
+    fontWeight: "700",
     fontSize: 12,
   },
   empty: {
-    padding: 40,
+    padding: spacing.xl,
     alignItems: "center",
   },
   emptyText: {
-    color: "#6b7280",
+    color: colors.muted,
     textAlign: "center",
   },
   footer: {
-    paddingVertical: 20,
+    paddingVertical: spacing.lg,
     alignItems: "center",
   },
   footerText: {
-    color: "#9ca3af",
+    color: colors.muted,
   },
   skeletonContainer: {
-    gap: 12,
+    gap: spacing.md,
   },
   skeletonCard: {
-    backgroundColor: "#f3f4f6",
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: "hidden",
   },
   skeletonThumb: {
     backgroundColor: "#e5e7eb",
   },
   skeletonBody: {
-    gap: 8,
+    gap: spacing.sm,
     justifyContent: "center",
+    paddingRight: spacing.md,
   },
   skeletonLine: {
     height: 12,
     backgroundColor: "#d1d5db",
-    borderRadius: 6,
+    borderRadius: radius.sm,
     width: "60%",
   },
   skeletonLineWide: {
     height: 16,
     backgroundColor: "#d1d5db",
-    borderRadius: 6,
+    borderRadius: radius.sm,
     width: "80%",
   },
   skeletonPrice: {
     height: 14,
     width: "40%",
     backgroundColor: "#cbd5f5",
-    borderRadius: 6,
+    borderRadius: radius.sm,
   },
 });

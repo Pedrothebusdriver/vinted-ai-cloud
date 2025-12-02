@@ -193,6 +193,7 @@ export type DraftSummary = {
   brand?: string;
   size?: string;
   colour?: string;
+  condition?: string;
   updated_at?: string;
   price_mid?: number;
   thumbnail_url?: string | null;
@@ -202,15 +203,19 @@ export type DraftSummary = {
 export type DraftPhoto = {
   id: number | string;
   url: string;
+  thumbnail_url?: string | null;
+  thumbnail_url_2x?: string | null;
+  filename?: string | null;
 };
 
 export type DraftDetail = DraftSummary & {
   description?: string;
-  condition?: string;
   price_low?: number;
   price_high?: number;
   selected_price?: number;
   photos: DraftPhoto[];
+  cover_photo_url?: string | null;
+  thumbnail_url_2x?: string | null;
   raw?: Record<string, any>;
 };
 
@@ -219,6 +224,13 @@ export type DraftUpdatePayload = {
   description?: string;
   price?: number;
   status?: string;
+  brand?: string;
+  size?: string;
+  colour?: string;
+  condition?: string;
+  cover_photo_url?: string;
+  thumbnail_url?: string;
+  thumbnail_url_2x?: string;
 };
 
 export type DraftListFilters = {
