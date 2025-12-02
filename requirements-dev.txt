@@ -1,0 +1,6 @@
+fastapi
+pydantic
+opencv-python
+pillow
+pytest
+pytest-cov
