@@ -1062,6 +1062,10 @@ def update_draft(draft_id: int):
 def health():
     return jsonify({"ok": True, "vinted_base": VINTED_BASE})
 
+@app.get("/")
+def root():
+    return jsonify({"status": "ok", "service": "vinted-ai-cloud", "docs": "/docs"})
+
 def _params_from_request(req):
     brand = (req.args.get("brand") or "").strip()
     item_type = (req.args.get("item_type") or "").strip()
