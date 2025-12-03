@@ -1,6 +1,6 @@
 fastapi
 pydantic
 opencv-python
-pillow
+Pillow>=11.0.0
 pytest
 pytest-cov
