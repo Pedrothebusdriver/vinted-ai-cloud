@@ -4,3 +4,4 @@ opencv-python
 Pillow>=11.0.0
 pytest
 pytest-cov
+ImageHash>=4.3.1
