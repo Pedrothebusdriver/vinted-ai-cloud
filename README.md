@@ -26,10 +26,15 @@ and push a Discord learning snapshot. Customize behaviour via env vars in
 SAMPLER_SOURCE=lorem             # or openverse / vinted (auth required)
 SAMPLER_BUCKETS=jackets,jeans
 SAMPLER_PER_BUCKET=10
-SAMPLER_TOTAL_LIMIT=40
-PI_INFER_URL=http://127.0.0.1:8080/api/infer?fast=1
+SAMPLER_TOTAL_LIMIT=50
+PI_INFER_URL=http://127.0.0.1:10000/api/infer?fast=1
 DISCORD_AGENT_WEBHOOK=https://discord.com/api/webhooks/...
 ```
+
+Sampler sources:
+- `lorem` (placeholder loremflickr), `openverse` (public Openverse API), `vinted` (real listings).
+- On the Pi, `scripts/run_sampler_cycle.sh` defaults to `vinted` when `~/secrets/vinted.json` exists, otherwise `openverse`.
+- Inference and learning notify now hit port `10000` by default (`/api/infer?fast=1` and `/api/learning/notify` on the same base).
 
 For real listings, set `SAMPLER_SOURCE=vinted`, drop your creds in
 `~/secrets/vinted.json`, and follow the steps in `docs/vinted-auth-notes.md`.
