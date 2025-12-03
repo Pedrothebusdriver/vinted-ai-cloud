@@ -15,6 +15,7 @@ Timeframe: now through end of December 2025. Objective: have FlipLens ready for 
 - Finish the self-play/teacher-student loop: scrape UK listings, produce GBP-correct logs, and run evals that show field accuracy + price errors.
 - Auto-learn consumes self-play + user corrections and updates heuristics config in GBP.
 - Keep reports and logs reproducible; CLI commands work out of the box.
+- Vinted-backed sampler mode is implemented and wired into the Pi defaults (port 10000).
 
 ### Week 2: Golden mobile flow
 - Make the mobile “golden path” rock solid: connect → select photos → upload → edit → export/paste.
